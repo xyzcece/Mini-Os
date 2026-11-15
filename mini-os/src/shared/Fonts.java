@@ -36,7 +36,11 @@ public final class Fonts {
     /** Body text, inputs, results, numbers. */
     public static Font body(float size)   { return load("DotGothic16-Regular.ttf").deriveFont(size); }
     /** "OS Lab" and sidebar module names. */
-    public static Font pixel(float size)  { return load("PixelifySans-Variable.ttf").deriveFont(Font.BOLD, size); }
+    public static Font pixel(float size)  { return load("PixelifySans-Bold.ttf").deriveFont(size); }
     /** Clean bold UI text. */
-    public static Font ui(float size)     { return load("Nunito-Variable.ttf").deriveFont(Font.BOLD, size); }
+    public static Font ui(float size)     { return load("Nunito-VariableFont_wght.ttf").deriveFont(Font.BOLD, size); }
+    /** Sidebar module names (Nunito Bold). */
+    public static Font uiBold(float size)  { return load("Nunito-Bold.ttf").deriveFont(size); }
+    /** The open module in the sidebar (Nunito ExtraBold). */
+    public static Font uiExtraBold(float size) { return load("Nunito-ExtraBold.ttf").deriveFont(size); }
 }

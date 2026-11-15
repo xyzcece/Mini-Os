@@ -1,9 +1,9 @@
 package modules.disk;
 
-import shared.ModulePanel;
-import shared.Theme;
-
+import java.awt.BorderLayout;
 import javax.swing.*;
+import modules.common.FigmaModule;
+import shared.Theme;
 
 /**
  * DISK SCHEDULING  —  OWNER: Member 2
@@ -14,20 +14,36 @@ import javax.swing.*;
  *   [ ] Seek-path graph
  * CHECK: SSTF (head 53): 236 cylinders
  *
- * Tip: copy the pattern in modules/paging/PagingModule.java
+ * The page design (header, inputs, run button, result card) comes from FigmaModule.
+ * Tip: see modules/paging/PagingModule.java for a finished module on the same design.
  */
-public class DiskModule extends ModulePanel {
+public class DiskModule extends FigmaModule {
+    private static final long serialVersionUID = 1L;
+    static final String[] ALGOS = {"FCFS", "SSTF", "SCAN", "C-SCAN", "LOOK", "C-LOOK"};
+    private JTextField requests, head, max;
+    private String algo = "FCFS";
 
     @Override public String title()    { return "Disk Scheduling"; }
     @Override public String subtitle() { return "Compare seek order and total head movement."; }
+    @Override protected String crumb() { return "DISK"; }
+    @Override protected String lead()  { return "Order the disk requests and add up the head movement."; }
 
     @Override protected void buildInputs(JPanel p) {
-        // TODO: add your inputs, e.g.  JTextField f = inputRow(p, "Label", "default value");
+        requests = new RoundField(requests == null ? "" : requests.getText());
+        head     = new RoundField(head     == null ? "" : head.getText());
+        max      = new RoundField(max      == null ? "" : max.getText());
+        Dropdown pick = new Dropdown(algo, ALGOS, a -> { algo = a; rebuildInputs(); });
+        p.add(columns(new double[]{2.4, 1, 1, 1.2},
+                labeled("Requests", requests, "tracks separated by spaces"),
+                labeled("Initial head", head, null),
+                labeled("Disk max", max, null),
+                labeled("Algorithm", pick, null)), BorderLayout.CENTER);
     }
 
     @Override protected void runSimulation(JPanel r) {
-        r.add(kicker("Simulation output · Disk Scheduling"));
-        r.add(text("Coming soon — Member 2 is building this module.", 14, Theme.muted()));
-        // TODO: read inputs, compute, then add results:  r.add(table(headers, rows));
+        r.add(pixelText("SIMULATION OUTPUT · DISK SCHEDULING", 7f, Theme.dark ? Theme.cyan() : Theme.text(), 0f));
+        r.add(Box.createVerticalStrut(12));
+        r.add(Notice.prompt("Coming soon — Member 2 is building this module."));
+        // TODO: read inputs, compute, then add results (seek table, total cylinders, seek-path graph).
     }
 }
