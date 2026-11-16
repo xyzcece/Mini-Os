@@ -1,0 +1,12 @@
+bin/
+out/
+build/
+target/
+*.class
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+.idea/
+*.iml
+.DS_Store
+Thumbs.db

@@ -52,7 +52,7 @@ public class MiniOS extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setSize(1280, 860);
         setLocationRelativeTo(null);
-        try { setIconImage(ImageIO.read(new File("assets/images/app_icon.png"))); } catch (Exception ignored) {}
+        try { setIconImage(ImageIO.read(Fonts.file("assets/images/app_icon.png"))); } catch (Exception ignored) {}
 
         setContentPane(desktop);
         desktop.setLayout(new BorderLayout());
@@ -510,7 +510,7 @@ public class MiniOS extends JFrame {
     private static Icon icon(String name, int w, int h, boolean flip) {
         java.awt.image.BufferedImage img = null;
         for (String suffix : new String[]{"@8x", "@4x", "@3x", "@2x", "@1x", ""}) {
-            File f = new File("assets/images/" + name + suffix + ".png");
+            File f = Fonts.file("assets/images/" + name + suffix + ".png");
             if (!f.exists()) continue;
             try { img = ImageIO.read(f); break; } catch (Exception ignored) { }
         }

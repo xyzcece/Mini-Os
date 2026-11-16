@@ -28,8 +28,8 @@ public class AnimatedBackground extends JPanel {
     public AnimatedBackground() {
         setLayout(null);
         try {
-            dayBg = ImageIO.read(new File("assets/images/wallpaper_umak_morning.png"));
-            nightBg = ImageIO.read(new File("assets/images/wallpaper_umak_night.png"));
+            dayBg = ImageIO.read(Fonts.file("assets/images/wallpaper_umak_morning.png"));
+            nightBg = ImageIO.read(Fonts.file("assets/images/wallpaper_umak_night.png"));
         } catch (IOException e) {
             throw new RuntimeException("Run the app from the project root so /assets can be found", e);
         }

@@ -1,0 +1,6 @@
+{
+    "java.project.sourcePaths": [
+        "mini-os/src"
+    ],
+    "java.project.outputPath": "mini-os/bin"
+}

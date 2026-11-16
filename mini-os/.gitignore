@@ -3,7 +3,9 @@ out/
 build/
 target/
 *.class
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
 .idea/
 *.iml
 .DS_Store

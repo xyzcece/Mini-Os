@@ -296,7 +296,7 @@ public abstract class FigmaModule extends ModulePanel {
         private static final long serialVersionUID = 1L;
         private static BufferedImage art;
         static {
-            try { art = ImageIO.read(new File("assets/images/heron_sticker_simulating@3x.png")); }
+            try { art = ImageIO.read(Fonts.file("assets/images/heron_sticker_simulating@3x.png")); }
             catch (Exception e) { art = null; }
         }
         static final int ART_W = 96;
