@@ -67,6 +67,7 @@ public class MiniOS extends JFrame {
 
         setContentPane(desktop);
         desktop.setLayout(new BorderLayout());
+        startSpriteClock();
 
         JLayeredPane stage = new JLayeredPane() {
             @Override public void doLayout() {
@@ -269,7 +270,7 @@ public class MiniOS extends JFrame {
 
         for (int i = 0; i < MODULES.length; i++) {
             final int idx = i;
-            NavItem b = new NavItem(sidebarCollapsed ? "" : MODULES[i].title(), icon("folder_" + FOLDERS[i], 48, 36), i == active);
+            NavItem b = new NavItem(sidebarCollapsed ? "" : MODULES[i].title(), moduleIcon(i, 34, false), i == active);
             if (sidebarCollapsed) b.setToolTipText(MODULES[i].title());
             b.addActionListener(e -> open(idx));
             sidebar.add(b);
@@ -520,7 +521,7 @@ public class MiniOS extends JFrame {
         grid.setOpaque(false);
         for (int i = 0; i < MODULES.length; i++) {
             final int idx = i;
-            JButton b = new JButton(MODULES[i].title(), icon("folder_" + FOLDERS[i], 48, 36)) {
+            JButton b = new JButton(MODULES[i].title(), moduleIcon(i, 44, true)) {
                 @Override protected void paintComponent(Graphics g) {
                     Graphics2D g2 = (Graphics2D) g.create();
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -562,7 +563,7 @@ public class MiniOS extends JFrame {
         menu.setBackground(Theme.panel());
         for (int i = 0; i < MODULES.length; i++) {
             final int idx = i;
-            JMenuItem item = new JMenuItem(MODULES[i].title(), icon("folder_" + FOLDERS[i], 24, 18));
+            JMenuItem item = new JMenuItem(MODULES[i].title(), moduleIcon(i, 20, false));
             item.setFont(Fonts.ui(13f));
             item.setBackground(i == active ? Theme.panel2() : Theme.panel());
             item.setForeground(Theme.text());
@@ -600,7 +601,7 @@ public class MiniOS extends JFrame {
         taskButton.setVisible(true);
         taskButton.setText(MODULES[i].title());
         taskButton.setIcon(LineIcons.MODULE[i].icon(15, Color.WHITE));
-        taskFolder.setIcon(icon("folder_" + FOLDERS[i], 26, 20));   // the taskbar folder follows the open module
+        taskFolder.setIcon(moduleIcon(i, 22, false));   // the taskbar folder follows the open module
         buildWindow();
         if (MODULES[i] instanceof modules.common.FigmaModule fm) {
             SwingUtilities.invokeLater(fm::bounceSticker);
@@ -666,7 +667,7 @@ public class MiniOS extends JFrame {
         };
         folderBox.setOpaque(false);
         folderBox.setBorder(new EmptyBorder(0, 8, 0, 8));
-        taskFolder.setIcon(icon("folder_" + FOLDERS[active], 26, 20));
+        taskFolder.setIcon(moduleIcon(active, 22, false));
         folderBox.add(taskFolder);
         folderBox.setMaximumSize(new Dimension(42 + 2, 31));
         bar.add(folderBox);
@@ -919,6 +920,138 @@ public class MiniOS extends JFrame {
         b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         b.setMargin(new Insets(2, 8, 3, 8));
         return b;
+    }
+
+    // ======================= ANIMATED MODULE SPRITES =======================
+
+    /** Seconds since start-up; every sprite reads the same clock so they stay in step. */
+    private static final long T0 = System.nanoTime();
+    private static double clock() { return (System.nanoTime() - T0) / 1_000_000_000.0; }
+
+    private static final java.util.List<Sprite> SPRITES = new java.util.ArrayList<>();
+    private static javax.swing.Timer spriteTimer;
+
+    /** Repaints only the buttons whose sprite is actually moving, at the desktop's own cadence. */
+    private static void startSpriteClock() {
+        if (spriteTimer != null) return;
+        spriteTimer = new javax.swing.Timer(45, e -> {
+            java.util.Set<Component> dirty = new java.util.LinkedHashSet<>();
+            boolean crowded = SPRITES.size() > 64;     // many rebuilds (theme toggles) have piled up
+            for (java.util.Iterator<Sprite> it = SPRITES.iterator(); it.hasNext(); ) {
+                Sprite s = it.next();
+                if (s.host == null) {
+                    if (crowded) it.remove();          // built but never shown, e.g. a start menu that was closed
+                    continue;
+                }
+                if (!s.host.isShowing()) { it.remove(); continue; }   // sidebar/desktop was rebuilt
+                if (s.moving()) dirty.add(s.host);
+            }
+            for (Component c : dirty) c.repaint();
+        });
+        spriteTimer.start();
+    }
+
+    /**
+     * A module's pixel-art sprite, fitted to a square box so every icon is the same size
+     * whatever shape the artwork is. Desktop icons drift up and down on their own; every
+     * sprite leans in and tips a little while the pointer is on it, and squashes on click.
+     */
+    private static class Sprite implements Icon {
+        private static final java.util.Map<String, java.awt.image.BufferedImage> CACHE = new java.util.HashMap<>();
+        private final java.awt.image.BufferedImage art;
+        private final int box;
+        private final double phase;      // keeps the eight icons from bobbing in lockstep
+        private final boolean drifts;
+        private Component host;
+        private double scale = 1, lean;
+
+        Sprite(String name, int box, int index, boolean drifts) {
+            this.box = box;
+            this.drifts = drifts;
+            this.phase = index * 0.8;
+            String key = name + "@" + box;
+            this.art = CACHE.computeIfAbsent(key, k -> {
+                java.awt.image.BufferedImage src = null;
+                for (String suffix : new String[]{"@8x", "@4x", "@3x", "@2x", "@1x", ""}) {
+                    File f = Fonts.file("assets/images/" + name + suffix + ".png");
+                    if (!f.exists()) continue;
+                    try { src = ImageIO.read(f); break; } catch (Exception ignored) { }
+                }
+                return src == null ? null : fit(src, box * 2);
+            });
+        }
+
+        /** Halving step by step keeps a 500px sprite readable at 40px; one big jump aliases it. */
+        private static java.awt.image.BufferedImage fit(java.awt.image.BufferedImage src, int side) {
+            double k = side / (double) Math.max(src.getWidth(), src.getHeight());
+            int w = Math.max(1, (int) Math.round(src.getWidth() * k));
+            int h = Math.max(1, (int) Math.round(src.getHeight() * k));
+            java.awt.image.BufferedImage cur = src;
+            while (cur.getWidth() / 2 > w && cur.getHeight() / 2 > h) {
+                cur = step(cur, cur.getWidth() / 2, cur.getHeight() / 2);
+            }
+            return step(cur, w, h);
+        }
+
+        private static java.awt.image.BufferedImage step(java.awt.image.BufferedImage src, int w, int h) {
+            java.awt.image.BufferedImage out =
+                    new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = out.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g.drawImage(src, 0, 0, w, h, null);
+            g.dispose();
+            return out;
+        }
+
+        private boolean hot() {
+            return host instanceof AbstractButton b && b.getModel().isRollover() && b.isEnabled();
+        }
+
+        private boolean pressed() {
+            return host instanceof AbstractButton b && b.getModel().isPressed();
+        }
+
+        /** True while there is still something to redraw, so idle icons cost nothing. */
+        boolean moving() {
+            return drifts || hot() || pressed() || Math.abs(scale - 1) > 0.002 || Math.abs(lean) > 0.001;
+        }
+
+        @Override public int getIconWidth()  { return box; }
+        @Override public int getIconHeight() { return box; }
+
+        @Override public void paintIcon(Component c, Graphics g0, int x, int y) {
+            host = c;
+            if (art == null) return;
+            double t = clock();
+
+            double wantScale = pressed() ? 0.90 : hot() ? 1.16 : 1.0;
+            double wantLean = hot() ? Math.sin(t * 7.5 + phase) * 0.09 : 0;
+            scale += (wantScale - scale) * 0.28;          // ease, so it never snaps
+            lean += (wantLean - lean) * 0.35;
+
+            double bob = drifts ? Math.sin(t * 1.7 + phase) * 1.8 : 0;
+            if (hot()) bob -= 2.0;                        // lifts towards the pointer
+
+            double side = box * scale;
+            double cx = x + box / 2.0, cy = y + box / 2.0 + bob;
+
+            Graphics2D g = (Graphics2D) g0.create();
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            if (Math.abs(lean) > 0.001) g.rotate(lean, cx, cy);
+            g.drawImage(art, (int) Math.round(cx - side / 2), (int) Math.round(cy - side / 2),
+                    (int) Math.round(side), (int) Math.round(side), null);
+            g.dispose();
+        }
+    }
+
+    /** The sprite for module i, sized to a square box. Desktop icons drift, list icons do not. */
+    private Icon moduleIcon(int i, int box, boolean drifts) {
+        Sprite s = new Sprite("icon_" + FOLDERS[i], box, i, drifts);
+        SPRITES.add(s);
+        return s;
     }
 
     /** Icon drawn at w x h from the sharpest file available: name@8x/@4x/@2x.png, or name.png. */
