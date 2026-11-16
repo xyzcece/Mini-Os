@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Mini OS",
+            "request": "launch",
+            "mainClass": "app.Main",
+            "sourcePaths": ["${workspaceFolder}/mini-os/src"],
+            "cwd": "${workspaceFolder}/mini-os"
+        }
+    ]
+}

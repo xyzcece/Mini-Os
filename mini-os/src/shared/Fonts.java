@@ -14,10 +14,18 @@ public final class Fonts {
     private Fonts() {}
     private static final Map<String, Font> cache = new HashMap<>();
 
+    /** Resolves a project file whether the working directory is the repo root or mini-os/. */
+    public static File file(String path) {
+        File f = new File(path);
+        if (f.exists()) return f;
+        File nested = new File("mini-os/" + path);
+        return nested.exists() ? nested : f;
+    }
+
     private static Font load(String file) {
         return cache.computeIfAbsent(file, f -> {
             try {
-                Font font = Font.createFont(Font.TRUETYPE_FONT, new File("fonts/" + f));
+                Font font = Font.createFont(Font.TRUETYPE_FONT, file("fonts/" + f));
                 GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(font);
                 return font;
             } catch (Exception e) {
@@ -36,7 +44,11 @@ public final class Fonts {
     /** Body text, inputs, results, numbers. */
     public static Font body(float size)   { return load("DotGothic16-Regular.ttf").deriveFont(size); }
     /** "OS Lab" and sidebar module names. */
-    public static Font pixel(float size)  { return load("PixelifySans-Variable.ttf").deriveFont(Font.BOLD, size); }
+    public static Font pixel(float size)  { return load("PixelifySans-Bold.ttf").deriveFont(size); }
     /** Clean bold UI text. */
-    public static Font ui(float size)     { return load("Nunito-Variable.ttf").deriveFont(Font.BOLD, size); }
+    public static Font ui(float size)     { return load("Nunito-VariableFont_wght.ttf").deriveFont(Font.BOLD, size); }
+    /** Sidebar module names (Nunito Bold). */
+    public static Font uiBold(float size)  { return load("Nunito-Bold.ttf").deriveFont(size); }
+    /** The open module in the sidebar (Nunito ExtraBold). */
+    public static Font uiExtraBold(float size) { return load("Nunito-ExtraBold.ttf").deriveFont(size); }
 }
