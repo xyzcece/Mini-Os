@@ -71,7 +71,7 @@ public class DiskModule extends FigmaModule {
 
         JPanel tools = new JPanel();
         tools.setOpaque(false);
-        tools.setLayout(new BoxLayout(tools, BoxLayout.X_AXIS));
+        tools.setLayout(new WrapLayout(FlowLayout.LEFT, 0, 6));   // wraps onto a 2nd line when narrow
         tools.setBorder(new EmptyBorder(10, 0, 0, 0));
 
         DashedPill dirBtn = new DashedPill(dirUp ? "Direction: Up (→ max)" : "Direction: Down (→ 0)");
@@ -161,6 +161,16 @@ public class DiskModule extends FigmaModule {
         tools.add(undoBtn);
         tools.add(Box.createHorizontalStrut(8));
         tools.add(clearBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        DashedPill badBtn = new DashedPill("Invalid input test");
+        badBtn.addActionListener(e -> {
+            pushUndo();
+            setFields("98 183 -5 400 abc", "250", "199");
+            hasRun = true;
+            rerun();
+            showToast(this, "Loaded bad input - the result card shows what to fix");
+        });
+        tools.add(badBtn);
         tools.add(Box.createHorizontalStrut(12));
         tools.add(countBadge);
         p.add(tools, BorderLayout.SOUTH);
@@ -214,27 +224,41 @@ public class DiskModule extends FigmaModule {
             return;
         }
 
-        List<Integer> reqList = null;
+        List<Integer> reqList = new ArrayList<>();
         int headPos = 0, maxTrack = 0;
-        boolean bad = false;
-        try {
-            maxTrack = Integer.parseInt(max.getText().trim());
-            if (maxTrack <= 0) throw new IllegalArgumentException();
-        } catch (IllegalArgumentException e) { max.setInvalid(true); bad = true; }
-        try {
-            headPos = Integer.parseInt(head.getText().trim());
-            if (headPos < 0 || (!bad && headPos > maxTrack)) throw new IllegalArgumentException();
-        } catch (IllegalArgumentException e) { head.setInvalid(true); bad = true; }
-        try {
-            reqList = parseRequests(requests.getText());
-            for (int req : reqList) {
-                if (req < 0 || (!bad && req > maxTrack)) throw new IllegalArgumentException();
+        List<String> problems = new ArrayList<>();
+        Integer mx = whole(max.getText(), "the disk max", problems);
+        if (mx != null && mx <= 0) { problems.add("the disk max is " + mx + " - it must be more than 0"); mx = null; }
+        if (mx == null) max.setInvalid(true); else maxTrack = mx;
+        Integer hd = whole(head.getText(), "the initial head", problems);
+        if (hd != null && (hd < 0 || (mx != null && hd > maxTrack))) {
+            problems.add("the initial head " + hd + " is outside the disk (0 to " + (mx == null ? "disk max" : maxTrack) + ")");
+            hd = null;
+        }
+        if (hd == null) head.setInvalid(true); else headPos = hd;
+        String raw = requests.getText().trim();
+        if (raw.isEmpty()) { problems.add("the request list is blank - type tracks, e.g. 98 183 37 122"); requests.setInvalid(true); }
+        for (String t : raw.isEmpty() ? new String[0] : raw.split("[\\s,]+")) {
+            if (t.isEmpty()) continue;
+            try {
+                int req = Integer.parseInt(t);
+                if (req < 0 || (mx != null && req > maxTrack)) {
+                    problems.add("request " + req + " is outside the disk (0 to " + (mx == null ? "disk max" : maxTrack) + ")");
+                    requests.setInvalid(true);
+                }
+                reqList.add(req);
+            } catch (NumberFormatException e) {
+                problems.add("request \"" + t + "\" is not a whole number");
+                requests.setInvalid(true);
             }
-        } catch (IllegalArgumentException e) { requests.setInvalid(true); bad = true; }
+        }
 
-        if (bad) {
-            r.add(new Notice(false, "Input check",
-                    "use whole numbers with disk max > 0, and every request and initial head between 0 and disk max."));
+        if (!problems.isEmpty()) {
+            r.add(new Notice(false, "Input check", problems.get(0)));
+            for (int i = 1; i < Math.min(problems.size(), 4); i++) { r.add(Box.createVerticalStrut(6)); r.add(new Notice(false, "Also", problems.get(i))); }
+            if (problems.size() > 4) { r.add(Box.createVerticalStrut(6)); r.add(body("... and " + (problems.size() - 4) + " more to fix.", 12, Theme.muted())); }
+            r.add(Box.createVerticalStrut(6));
+            r.add(body("Rule: whole numbers only; disk max > 0, and every request and the initial head between 0 and disk max.", 12, Theme.muted()));
             return;
         }
 
@@ -301,6 +325,7 @@ public class DiskModule extends FigmaModule {
             };
         }
         r.add(collapsibleSection("COMPARE ALL ALGORITHMS", new CompareTable(cmp, current, totals, minTotal)));
+        r.add(explainSection(explain(algo, headPos, maxTrack, dirUp, res)));
 
         if (maxTotal > minTotal) {
             int saved = maxTotal - minTotal;
@@ -357,7 +382,7 @@ public class DiskModule extends FigmaModule {
             });
             menu.add(mi);
         }
-        menu.show(invoker, 0, invoker.getHeight());
+        if (invoker.isShowing()) menu.show(invoker, 0, invoker.getHeight());
     }
 
     private static JComponent cappedScroll(JComponent comp, int maxH) {
@@ -376,6 +401,14 @@ public class DiskModule extends FigmaModule {
         sp.getVerticalScrollBar().setUnitIncrement(20);
         styleScrollPane(sp);
         return sp;
+    }
+
+    /** Whole number, or null with a message naming the field. */
+    private static Integer whole(String s, String what, List<String> problems) {
+        String t = s.trim();
+        if (t.isEmpty()) { problems.add(what + " is blank"); return null; }
+        try { return Integer.parseInt(t); }
+        catch (NumberFormatException e) { problems.add(what + " (\"" + t + "\") is not a whole number"); return null; }
     }
 
     static List<Integer> parseRequests(String raw) {
@@ -398,6 +431,32 @@ public class DiskModule extends FigmaModule {
     }
 
     // ============================ ALGORITHMS ============================
+
+    /** One line per head movement: where it went, why, and how far. */
+    static List<String> explain(String algo, int head, int maxTrack, boolean dirUp, Result res) {
+        List<String> out = new ArrayList<>();
+        String dir = dirUp ? "up (toward " + maxTrack + ")" : "down (toward 0)";
+        out.add(switch (algo) {
+            case "SSTF" -> "Rule (SSTF): always go to the pending request closest to the head.";
+            case "SCAN" -> "Rule (SCAN): sweep " + dir + " serving requests, go all the way to the end of the disk, then turn around.";
+            case "C-SCAN" -> "Rule (C-SCAN): sweep " + dir + " serving requests to the end of the disk, jump to the other end, and sweep the same way again.";
+            case "LOOK" -> "Rule (LOOK): sweep " + dir + " serving requests, turn around at the last request (not the disk end).";
+            case "C-LOOK" -> "Rule (C-LOOK): sweep " + dir + " to the last request, jump to the farthest request on the other side, and sweep the same way again.";
+            default -> "Rule (FCFS): serve the requests in the order they were given.";
+        });
+        out.add("Start: head at track " + head + ".");
+        for (Step s : res.steps) {
+            String why = s.boundary ? "end of the sweep" : switch (algo) {
+                case "SSTF" -> "closest pending request";
+                case "FCFS" -> "next in the list";
+                default -> "next request in the sweep";
+            };
+            out.add(String.format("%d → %d (%s): |%d − %d| = %,d cylinders.", s.from, s.to, why, s.to, s.from, s.traverse));
+        }
+        out.add(String.format("Total head movement = sum of the moves = %,d cylinders; average = %,d ÷ requests = %.2f.",
+                res.total, res.total, res.average));
+        return out;
+    }
 
     static final class Step {
         final int index, from, to, traverse;

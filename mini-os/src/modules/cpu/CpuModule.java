@@ -11,21 +11,28 @@ import java.util.function.Consumer;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
+import modules.common.EntryGrid;
 import modules.common.FigmaModule;
 import shared.Fonts;
 import shared.Theme;
 
 /**
  * CPU SCHEDULING  —  OWNER: Member 1
- *   [x] AT/RT job input table (7 jobs) + Add job / Remove job (J# is numbered 1..n)
- *   [x] Algorithm dropdown: FIFO, SJF, SRT, Round Robin + time quantum
+ *   [x] AT/RT job input: boxes for up to 7 jobs, a scrolling table for 8+ (same as Multiprogramming),
+ *       with +1 / +5 / −1 / [count] Set / Paste / Bulk (J# is numbered 1..n)
+ *   [x] Algorithm dropdown: FIFO, SJF, SRT, Priority (non-preemptive) and Priority (preemptive)
+ *       (lower PRI number = higher priority),
+ *       Round Robin + time quantum
  *   [x] Job table: J#, AT, RT, ST, FT, WT, CT, TAT
- *   [x] AWT and ATAT + Gantt chart (+ comparison of all 4 algorithms)
+ *   [x] AWT and ATAT + Gantt chart (+ comparison of all 6 algorithms)
+ *   [x] Toolbar: Sample data, Idle-gap sample, Large sample (20 jobs), Random, Invalid input test,
+ *       History (recent runs), Undo, Clear - for the small/large/boundary/error test cases in the rubric
  * CHECK: FIFO (7 sample jobs): AWT = 46.43, ATAT = 63.57
  *        SJF 33.57 / 50.71 · SRT 27.86 / 45.00 · RR(q=10) 57.86 / 75.00
+ *        Priority (PRI 3,1,4,2,5,1,3): order J1 J2 J6 J4 J7 J3 J5, AWT = 36.43, ATAT = 53.57
  *
  * Words used in the table:
- *   AT = arrival time, RT = run (burst) time, ST = start time, FT = finish time,
+ *   AT = arrival time, RT = run (burst) time, PRI = priority (1 = highest), ST = start time, FT = finish time,
  *   WT = waiting time (TAT - RT), CT = completion time (= FT), TAT = turnaround (FT - AT)
  *
  * Layout follows the Figma frame "CPU Scheduling" (mini-os file, node 1:7).
@@ -33,21 +40,37 @@ import shared.Theme;
 public class CpuModule extends FigmaModule {
     private static final long serialVersionUID = 1L;
 
-    static final String[] ALGOS = {"FIFO", "SJF", "SRT", "Round Robin"};
+    static final String[] ALGOS = {"FIFO", "SJF", "SRT", "Priority", "Priority (preemptive)", "Round Robin"};
 
     /**
      * Jobs as {AT, RT}; job J# is its position (1..n). Starts with 7 empty jobs for the person to fill in
      * (class example: AT 0,5,10,15,20,25,30 · RT 30,15,25,10,20,5,15 · quantum 10).
      */
-    private final transient List<String[]> jobs = new ArrayList<>();
-    { for (int i = 0; i < 7; i++) jobs.add(new String[]{"", ""}); }
-    private final transient List<JTextField[]> jobFields = new ArrayList<>();
+    private final transient EntryGrid grid = new EntryGrid("J#", new String[]{"AT", "RT", "PRI"}, i -> "J" + (i + 1), 52, this::onRunPressed);
+    { grid.resize(7); }
     private JTextField quantum;
     private String algoChoice = "FIFO";
     private String quantumText = "";
 
+    /** Class example (CHECK values above): AT and RT of jobs 1..7, quantum 10. */
+    static final String[] SAMPLE_AT = {"0", "5", "10", "15", "20", "25", "30"};
+    static final String[] SAMPLE_RT = {"30", "15", "25", "10", "20", "5", "15"};
+    static final String[] SAMPLE_PRI = {"3", "1", "4", "2", "5", "1", "3"};
+    /** Boundary case: the CPU sits idle from 6 to 20 because no job has arrived yet. */
+    static final String[] GAP_AT = {"0", "2", "20", "22"};
+    static final String[] GAP_RT = {"4", "2", "5", "3"};
+    static final String[] GAP_PRI = {"2", "1", "3", "1"};
+    /** Exceptional case: a blank AT, a negative AT, a zero RT and a letter for a priority. */
+    static final String[] BAD_AT = {"0", "", "-3", "8"};
+    static final String[] BAD_RT = {"5", "4", "6", "0"};
+    static final String[] BAD_PRI = {"1", "2", "x", "1"};
+
+    /** Everything the person typed, for Undo and History. */
+    private record State(List<String[]> jobs, String algo, String quantum) {}
+    private final transient InputHistory<State> history = new InputHistory<>();
+
     @Override public String title()    { return "CPU Scheduling"; }
-    @Override public String subtitle() { return "Compare FIFO, SJF, SRT, and Round Robin (quantum = 10 min)."; }
+    @Override public String subtitle() { return "Compare FIFO, SJF, SRT, Priority, and Round Robin (quantum = 10 min)."; }
     @Override protected String crumb() { return "CPU"; }
     @Override protected String lead()  { return "Pick a policy, then read the job table, averages and Gantt chart."; }
     @Override protected int inputsTop() { return 4; }
@@ -56,12 +79,11 @@ public class CpuModule extends FigmaModule {
 
     @Override protected void buildInputs(JPanel p) {
         saveFields();   // keep what the user typed (theme change, add/remove job, new algorithm)
-        jobFields.clear();
         quantum = null;
 
         JComponent jobBox = jobBox(), settings = settings();
         // job box (fit to content) + settings column (fills the rest); stacks when there is no room
-        JPanel grid = new JPanel(null) {
+        JPanel layout = new JPanel(null) {
             private static final long serialVersionUID = 1L;
             private boolean assumedSide = true;   // what the last preferred height was based on
             private boolean side() { return getWidth() == 0 || getWidth() >= jobBox.getPreferredSize().width + 16 + 220; }
@@ -84,56 +106,94 @@ public class CpuModule extends FigmaModule {
                 return new Dimension(300, assumedSide ? Math.max(j.height, s.height) : j.height + 14 + s.height);
             }
         };
-        grid.setOpaque(false);
-        grid.add(jobBox);
-        grid.add(settings);
-        grid.addComponentListener(new ComponentAdapter() {
-            @Override public void componentResized(ComponentEvent e) { grid.revalidate(); }
+        layout.setOpaque(false);
+        layout.add(jobBox);
+        layout.add(settings);
+        layout.addComponentListener(new ComponentAdapter() {
+            @Override public void componentResized(ComponentEvent e) { layout.revalidate(); }
         });
-        p.add(grid, BorderLayout.CENTER);
+        p.add(layout, BorderLayout.CENTER);
+        p.add(toolbar(), BorderLayout.SOUTH);
     }
 
-    /** "JOBS" box: J# header, an AT row and an RT row of small inputs, + Add job. */
+    /** Sample / Idle-gap / Large / Random / Invalid input / History / Undo / Clear pills. */
+    private JComponent toolbar() {
+        DashedPill hist = new DashedPill("History");
+        hist.addActionListener(e -> history.showMenu(hist, this::restore));
+        return pillRow(12,
+                pill("Sample data (7 jobs)", () -> load(SAMPLE_AT, SAMPLE_RT, SAMPLE_PRI, "10",
+                        "Loaded the class example (7 jobs, q = 10)")),
+                pill("Idle-gap sample", () -> load(GAP_AT, GAP_RT, GAP_PRI, "3",
+                        "Loaded a case where the CPU is idle from 6 to 20")),
+                pill("Large sample (20 jobs)", () -> loadRandom(20, new Random(7), "Loaded 20 jobs")),
+                pill("Random", () -> loadRandom(grid.size(), new Random(), "Generated " + grid.size() + " random jobs")),
+                pill("Invalid input test", () -> load(BAD_AT, BAD_RT, BAD_PRI, "0",
+                        "Loaded bad input - the result card shows what to fix")),
+                hist,
+                pill("Undo", () -> history.undo(this, this::restore)),
+                pill("Clear", () -> {
+                    String[] blank = new String[grid.size()];
+                    Arrays.fill(blank, "");
+                    load(blank, blank, blank, "", "Cleared all jobs");
+                }));
+    }
+
+    private State snapshot() {
+        saveFields();
+        return new State(grid.copy(), algoChoice, quantumText);
+    }
+
+    /** Puts a snapshot back on screen and runs it. */
+    private void restore(State st) {
+        grid.setRows(st.jobs());   // drops the old cells so they are not copied back over the new data
+        algoChoice = st.algo();
+        quantumText = st.quantum();
+        quantum = null;
+        rebuildInputs();
+        rerun();
+    }
+
+    private void load(String[] at, String[] rt, String[] pri, String q, String toast) {
+        history.push(snapshot());
+        List<String[]> list = new ArrayList<>();
+        for (int i = 0; i < at.length; i++) list.add(new String[]{at[i], rt[i], pri[i]});
+        restore(new State(list, algoChoice, q));
+        showToast(this, toast);
+    }
+
+    private void loadRandom(int n, Random rng, String toast) {
+        saveFields();
+        String[] at = new String[n], rt = new String[n], pri = new String[n];
+        for (int i = 0; i < n; i++) {
+            at[i] = String.valueOf(rng.nextInt(4 * n + 1));   // arrivals spread over 0 .. 4n minutes
+            rt[i] = String.valueOf(1 + rng.nextInt(30));      // run time 1 .. 30 minutes
+            pri[i] = String.valueOf(1 + rng.nextInt(5));      // priority 1 (highest) .. 5
+        }
+        load(at, rt, pri, quantum(quantumText) == null ? "10" : quantumText, toast);
+    }
+
+    /** +1 / +5 / −1 / Set: changes the number of jobs, keeping what was typed (with Undo). */
+    private void resizeJobs(int n) {
+        history.push(snapshot());
+        grid.resize(n);
+        rebuildInputs();
+        showToast(this, grid.size() + (grid.size() == 1 ? " job" : " jobs"));
+    }
+
+    /** Paste / Bulk: replaces the jobs with the pasted lines (with Undo) and runs them. */
+    private void bulkLoad(List<String[]> pasted) {
+        history.push(snapshot());
+        grid.setRows(pasted);
+        rebuildInputs();
+        rerun();
+        showToast(this, "Imported " + pasted.size() + " jobs");
+    }
+
+    /** "JOBS" box: boxes for up to 7 jobs, a scrolling table for 8+, and the +1 / +5 / −1 / Set / Paste row. */
     private JComponent jobBox() {
-        Box12 b = new Box12(null);
-        b.setLayout(new BoxLayout(b, BoxLayout.Y_AXIS));
-
-        JPanel head = hRow();
-        head.add(pixelText("JOBS", 7f, Theme.dark ? new Color(0xff8fd0) : Theme.pink(), 0f));
-        head.add(Box.createHorizontalStrut(10));
-        head.add(body("times in minutes", 11, Theme.muted()));
-        b.add(head);
-        b.add(Box.createVerticalStrut(6));
-
-        JPanel ids = hRow(), at = hRow(), rt = hRow();
-        ids.add(cell("J#", 40, 22, Theme.muted()));
-        at.add(cell("AT", 40, 30, Theme.muted()));
-        rt.add(cell("RT", 40, 30, Theme.muted()));
-        for (int i = 0; i < jobs.size(); i++) {
-            JTextField a = new RoundField(jobs.get(i)[0], 6, 46, 30), r = new RoundField(jobs.get(i)[1], 6, 46, 30);
-            jobFields.add(new JTextField[]{a, r});
-            ids.add(Box.createHorizontalStrut(6)); ids.add(cell(String.valueOf(i + 1), 46, 22, Theme.text()));
-            at.add(Box.createHorizontalStrut(6));  at.add(a);
-            rt.add(Box.createHorizontalStrut(6));  rt.add(r);
-        }
-        b.add(ids); b.add(Box.createVerticalStrut(6));
-        b.add(at);  b.add(Box.createVerticalStrut(6));
-        b.add(rt);  b.add(Box.createVerticalStrut(6));
-
-        JPanel foot = hRow();
-        DashedPill add = new DashedPill("+ Add job");
-        add.addActionListener(e -> { saveFields(); jobs.add(new String[]{"", ""}); rebuildInputs(); });
-        foot.add(add);
-        if (jobs.size() > 1) {
-            DashedPill remove = new DashedPill("− Remove");
-            remove.addActionListener(e -> { saveFields(); jobs.remove(jobs.size() - 1); rebuildInputs(); });
-            foot.add(Box.createHorizontalStrut(8));
-            foot.add(remove);
-        }
-        foot.add(Box.createHorizontalStrut(12));
-        foot.add(body("AT = arrival time · RT = run time", 11, Theme.muted()));
-        b.add(foot);
-        return b;
+        return grid.box("JOBS", "job", "times in minutes",
+                "PRI: 1 = highest, used by Priority",
+                this::resizeJobs, this::bulkLoad);
     }
 
     /** Algorithm dropdown, plus the time quantum when Round Robin is picked. */
@@ -156,9 +216,7 @@ public class CpuModule extends FigmaModule {
 
     private void saveFields() {
         if (quantum != null) quantumText = quantum.getText();
-        if (jobFields.size() != jobs.size()) return;
-        for (int i = 0; i < jobs.size(); i++)
-            for (int c = 0; c < 2; c++) jobs.get(i)[c] = jobFields.get(i)[c].getText().trim();
+        grid.save();
     }
 
     private static JPanel hRow() {
@@ -169,58 +227,57 @@ public class CpuModule extends FigmaModule {
         return r;
     }
 
-    /** Fixed-size centred Silkscreen label (the J#, AT and RT headings of the job box). */
-    private static JLabel cell(String s, int w, int h, Color c) {
-        JLabel l = new JLabel(s, SwingConstants.CENTER);
-        l.setFont(Fonts.label(9f)); l.setForeground(c);
-        Dimension d = new Dimension(w, h);
-        l.setPreferredSize(d); l.setMinimumSize(d); l.setMaximumSize(d);
-        return l;
-    }
-
     // ============================ RESULTS ============================
 
     @Override protected void runSimulation(JPanel r) {
         saveFields();
+        grid.clearInvalid();
         String algo = algoChoice;
 
-        boolean rr = algo.equals("Round Robin");
-        boolean nothingTyped = jobs.stream().allMatch(j -> j[0].isEmpty() && j[1].isEmpty());
+        boolean rr = algo.equals("Round Robin"), prio = algo.startsWith("Priority");
+        boolean nothingTyped = grid.rows().stream().allMatch(j -> j[0].isEmpty() && j[1].isEmpty() && j[2].isEmpty());
         if (nothingTyped) {
             r.add(heading(algo.toUpperCase(), null));
             r.add(Box.createVerticalStrut(10));
             r.add(Notice.prompt("Type the arrival time (AT) and run time (RT) of each job"
-                    + (rr ? ", and the time quantum," : ",") + " then press RUN SIMULATION."));
+                    + (prio ? " and its priority (PRI)," : rr ? ", and the time quantum," : ",") + " then press RUN SIMULATION."));
             return;
         }
 
         List<Job> list;
         Integer q = quantum(quantumText);   // only needed for Round Robin
         try {
-            list = readJobs();
-            if (rr && q == null) throw new NumberFormatException();
+            list = readJobs(prio);
+            if (rr && q == null) throw new NumberFormatException("the time quantum must be a whole number more than 0");
         } catch (NumberFormatException e) {
             r.add(heading(algo.toUpperCase(), null));
             r.add(Box.createVerticalStrut(10));
-            r.add(new Notice(false, "Input check",
-                    "every AT and RT must be a whole number (AT ≥ 0, RT > 0)" + (rr ? " and the time quantum more than 0" : "")));
+            r.add(new Notice(false, "Input check", e.getMessage()));
+            r.add(Box.createVerticalStrut(6));
+            r.add(body("Rule: every AT and RT is a whole number; AT is 0 or more and RT is more than 0"
+                    + (prio ? "; every PRI is a whole number, 0 or more (1 = highest)." : "")
+                    + (rr ? "; the time quantum is more than 0." : "."), 12, Theme.muted()));
             return;
         }
 
         Result res = schedule(algo, list, rr ? q : 1);
+        history.record(String.format("%s · %d jobs · AWT %.2f", rr ? "RR q=" + q : algo, list.size(), res.awt), snapshot());
 
         // 1) heading + job table
         r.add(heading(rr ? "ROUND ROBIN · Q=" + q : algo.toUpperCase(),
-                list.size() + " jobs · times in minutes"));
+                list.size() + " jobs · times in minutes" + (prio ? " · lower PRI runs first, ties by arrival" : "")));
         r.add(Box.createVerticalStrut(10));
         String[][] rows = new String[list.size()][];
         for (int i = 0; i < list.size(); i++) {
             Job j = list.get(i);
             int st = res.start.get(j.id), ft = res.finish.get(j.id);
             int tat = ft - j.at, wt = tat - j.rt;
-            rows[i] = new String[]{j.id, "" + j.at, "" + j.rt, "" + st, "" + ft, "" + wt, "" + ft, "" + tat};
+            rows[i] = prio
+                    ? new String[]{j.id, "" + j.at, "" + j.rt, "" + j.pri, "" + st, "" + ft, "" + wt, "" + ft, "" + tat}
+                    : new String[]{j.id, "" + j.at, "" + j.rt, "" + st, "" + ft, "" + wt, "" + ft, "" + tat};
         }
-        r.add(new DataTable(new String[]{"J#", "AT", "RT", "ST", "FT", "WT", "CT", "TAT"}, rows, -1));
+        r.add(new DataTable(prio ? new String[]{"J#", "AT", "RT", "PRI", "ST", "FT", "WT", "CT", "TAT"}
+                : new String[]{"J#", "AT", "RT", "ST", "FT", "WT", "CT", "TAT"}, rows, -1));
         r.add(Box.createVerticalStrut(10));
 
         // 2) averages
@@ -239,6 +296,8 @@ public class CpuModule extends FigmaModule {
         Map<String, Integer> colorOf = new HashMap<>();
         for (Job j : list) colorOf.put(j.id, j.order);
         r.add(new Gantt(res.segments, colorOf));
+        r.add(Box.createVerticalStrut(6));
+        r.add(body("Order: " + runOrder(res), 12, Theme.muted()));
 
         // 4) compare all algorithms
         r.add(Box.createVerticalStrut(16));
@@ -252,11 +311,87 @@ public class CpuModule extends FigmaModule {
                 cmp[i] = new String[]{"Round Robin (pick it to set q)", "—", "—"};
                 continue;
             }
+            if (ALGOS[i].startsWith("Priority") && list.stream().anyMatch(j -> j.pri == null)) {   // PRI not filled in
+                cmp[i] = new String[]{ALGOS[i] + " - fill in PRI", "—", "—"};
+                continue;
+            }
             Result x = schedule(ALGOS[i], list, q == null ? 1 : q);
             cmp[i] = new String[]{ALGOS[i].equals("Round Robin") ? "Round Robin (q=" + q + ")" : ALGOS[i],
                     String.format("%.2f", x.awt), String.format("%.2f", x.atat)};
         }
         r.add(new DataTable(new String[]{"Algorithm", "AWT", "ATAT"}, cmp, current));
+
+        // 5) the decisions, in words
+        r.add(explainSection(explain(algo, list, res, rr ? q : 1)));
+    }
+
+    /** One line per Gantt block: who was ready, which job was picked and why, and what happened. */
+    static List<String> explain(String algo, List<Job> jobs, Result res, int q) {
+        List<String> out = new ArrayList<>();
+        Map<String, Job> byId = new HashMap<>();
+        for (Job j : jobs) byId.put(j.id, j);
+        Map<String, Integer> done = new HashMap<>();   // minutes each job has run so far
+        out.add(switch (algo) {
+            case "SJF" -> "Rule (SJF): when the CPU is free, run the waiting job with the shortest RT to the end; ties go to the earlier arrival.";
+            case "SRT" -> "Rule (SRT): always run the job with the least time left; check again whenever a new job arrives.";
+            case "Priority" -> "Rule (Priority, non-preemptive): when the CPU is free, run the waiting job with the lowest PRI number to the end; ties go to the earlier arrival.";
+            case "Priority (preemptive)" -> "Rule (Priority, preemptive): always run the waiting job with the lowest PRI number; a newly arrived job with a lower PRI takes the CPU.";
+            case "Round Robin" -> "Rule (Round Robin, q = " + q + "): jobs take turns in arrival order; each runs at most " + q + " min, then goes to the back of the line.";
+            default -> "Rule (FIFO): run jobs to the end in the order they arrived.";
+        });
+        for (Segment s : res.segments) {
+            if (s.id == null) {
+                String next = jobs.stream().filter(j -> j.at >= s.to).min(Comparator.comparingInt(j -> j.at))
+                        .map(j -> "J" + j.id).orElse("the next job");
+                out.add(String.format("t=%d–%d: CPU idle - no job is waiting; %s arrives at %d.", s.from, s.to, next, s.to));
+                continue;
+            }
+            Job j = byId.get(s.id);
+            int ran = done.getOrDefault(s.id, 0), left = j.rt - ran, run = s.to - s.from;
+            // jobs that were waiting at s.from (arrived, not finished)
+            List<String> ready = new ArrayList<>();
+            for (Job k : jobs) {
+                int kRan = done.getOrDefault(k.id, 0);
+                if (k.at <= s.from && kRan < k.rt) ready.add("J" + k.id + key(algo, k, k.rt - kRan));
+            }
+            String readyText = ready.size() > 8 ? String.join(", ", ready.subList(0, 8)) + ", ..." : String.join(", ", ready);
+            String why = switch (algo) {
+                case "SJF" -> "shortest RT = " + j.rt;
+                case "SRT" -> "least time left = " + left;
+                case "Priority", "Priority (preemptive)" -> "lowest PRI = " + j.pri;
+                case "Round Robin" -> "its turn in the line";
+                default -> "arrived first, AT " + j.at;
+            };
+            boolean finishes = run == left;
+            String end = finishes ? "finishes at " + s.to
+                    : algo.equals("Round Robin") ? "used its " + q + " min, " + (left - run) + " left - back of the line"
+                    : "stopped at " + s.to + " by a new arrival, " + (left - run) + " left";
+            out.add(String.format("t=%d: waiting %s → J%s (%s) runs %d–%d, %s.", s.from, readyText, j.id, why, s.from, s.to, end));
+            done.put(s.id, ran + run);
+        }
+        StringBuilder wt = new StringBuilder();
+        int sum = 0;
+        for (Job j : jobs) {
+            int w = res.finish.get(j.id) - j.at - j.rt;
+            sum += w;
+            if (wt.length() > 0) wt.append(" + ");
+            wt.append(w);
+        }
+        out.add(String.format("WT of each job = CT − AT − RT;  AWT = (%s) ÷ %d = %.2f.",
+                jobs.size() > 12 ? "sum of all WT = " + sum : wt.toString(), jobs.size(), sum / (double) jobs.size()));
+        out.add(String.format("TAT of each job = CT − AT;  ATAT = AWT + average RT = %.2f.", res.atat));
+        return out;
+    }
+
+    /** The number the rule compares, shown next to each waiting job. */
+    private static String key(String algo, Job k, int left) {
+        return switch (algo) {
+            case "SJF" -> " (RT " + k.rt + ")";
+            case "SRT" -> " (left " + left + ")";
+            case "Priority", "Priority (preemptive)" -> " (PRI " + k.pri + ")";
+            case "Round Robin" -> "";
+            default -> " (AT " + k.at + ")";
+        };
     }
 
     /** The time quantum if a whole number > 0 was typed, otherwise null. */
@@ -275,21 +410,59 @@ public class CpuModule extends FigmaModule {
         return pad(h, 0, 0, false);
     }
 
-    private List<Job> readJobs() {
+    /** Reads every job; PRI is only required when needPri (the Priority algorithm). */
+    private List<Job> readJobs(boolean needPri) {
         List<Job> list = new ArrayList<>();
-        for (String[] j : jobs) {
-            Job job = new Job(String.valueOf(list.size() + 1), Integer.parseInt(j[0]), Integer.parseInt(j[1]), list.size());
-            if (job.at < 0 || job.rt <= 0) throw new NumberFormatException();
-            list.add(job);
+        List<String[]> rows = grid.rows();
+        for (int i = 0; i < rows.size(); i++) {
+            int n = i + 1, at, rt;
+            Integer pri = null;
+            try {
+                at = whole(rows.get(i)[0], "AT of job " + n);
+                if (at < 0) throw new NumberFormatException("job " + n + ": AT " + at + " is negative - arrival time must be 0 or more");
+            } catch (NumberFormatException e) { grid.markInvalid(i, 0); throw e; }
+            try {
+                rt = whole(rows.get(i)[1], "RT of job " + n);
+                if (rt <= 0) throw new NumberFormatException("job " + n + ": RT " + rt + " - run time must be more than 0");
+            } catch (NumberFormatException e) { grid.markInvalid(i, 1); throw e; }
+            String p = rows.get(i)[2];
+            if (needPri || !p.isBlank()) {
+                try {
+                    pri = whole(p, "PRI of job " + n);
+                    if (pri < 0) throw new NumberFormatException("job " + n + ": PRI " + pri + " is negative - priority must be 0 or more");
+                } catch (NumberFormatException e) {
+                    if (needPri) { grid.markInvalid(i, 2); throw e; }
+                    pri = null;   // a bad PRI only matters when Priority is picked
+                }
+            }
+            list.add(new Job(String.valueOf(n), at, rt, pri, i));
         }
         return list;
+    }
+
+    /** The order jobs first get the CPU, e.g. "J1 → J2 → J6"; repeats show up for SRT / Round Robin. */
+    private static String runOrder(Result res) {
+        StringBuilder sb = new StringBuilder();
+        for (Segment s : res.segments) {
+            if (s.id == null) continue;
+            if (sb.length() > 0) sb.append(" → ");
+            sb.append('J').append(s.id);
+        }
+        return sb.toString();
+    }
+
+    /** Parses a whole number, or throws with a message that names the field. */
+    private static int whole(String s, String what) {
+        if (s.isBlank()) throw new NumberFormatException(what + " is blank");
+        try { return Integer.parseInt(s.trim()); }
+        catch (NumberFormatException e) { throw new NumberFormatException(what + " (\"" + s + "\") is not a whole number"); }
     }
 
     // ============================ ALGORITHMS ============================
 
     static class Job {
-        final String id; final int at, rt, order;
-        Job(String id, int at, int rt, int order) { this.id = id; this.at = at; this.rt = rt; this.order = order; }
+        final String id; final int at, rt, order; final Integer pri;   // pri is null when not given
+        Job(String id, int at, int rt, Integer pri, int order) { this.id = id; this.at = at; this.rt = rt; this.pri = pri; this.order = order; }
     }
 
     /** One block on the Gantt chart. id == null means the CPU is idle. */
@@ -308,6 +481,9 @@ public class CpuModule extends FigmaModule {
         Result r = switch (algo) {
             case "SJF" -> nonPreemptive(jobs, Comparator.<Job>comparingInt(j -> j.rt).thenComparingInt(j -> j.at).thenComparingInt(j -> j.order));
             case "SRT" -> srt(jobs);
+            case "Priority (preemptive)" -> preemptivePriority(jobs);
+            // Priority (non-preemptive): of the jobs that have arrived, run the lowest PRI number to the end
+            case "Priority" -> nonPreemptive(jobs, Comparator.<Job>comparingInt(j -> j.pri).thenComparingInt(j -> j.at).thenComparingInt(j -> j.order));
             case "Round Robin" -> roundRobin(jobs, quantum);
             default -> nonPreemptive(jobs, Comparator.<Job>comparingInt(j -> j.at).thenComparingInt(j -> j.order));
         };
@@ -349,6 +525,32 @@ public class CpuModule extends FigmaModule {
             final int now = t;
             Optional<Job> next = jobs.stream().filter(j -> j.at <= now && !r.finish.containsKey(j.id))
                     .min(Comparator.<Job>comparingInt(j -> rem.get(j.id)).thenComparingInt(j -> j.at).thenComparingInt(j -> j.order));
+            int nextArrival = jobs.stream().filter(j -> j.at > now).mapToInt(j -> j.at).min().orElse(Integer.MAX_VALUE);
+            if (!next.isPresent()) { addSegment(r, null, t, nextArrival); t = nextArrival; continue; }
+            Job j = next.get();
+            int run = Math.min(rem.get(j.id), nextArrival - t);
+            r.start.putIfAbsent(j.id, t);
+            addSegment(r, j.id, t, t + run);
+            t += run;
+            rem.put(j.id, rem.get(j.id) - run);
+            if (rem.get(j.id) == 0) r.finish.put(j.id, t);
+        }
+        return r;
+    }
+
+    /**
+     * Priority (preemptive): always run the waiting job with the lowest PRI number; re-check whenever a
+     * new job arrives, so a more important arrival takes the CPU. Ties: earlier arrival, then job number.
+     */
+    static Result preemptivePriority(List<Job> jobs) {
+        Result r = new Result();
+        Map<String, Integer> rem = new HashMap<>();
+        for (Job j : jobs) rem.put(j.id, j.rt);
+        int t = 0;
+        while (r.finish.size() < jobs.size()) {
+            final int now = t;
+            Optional<Job> next = jobs.stream().filter(j -> j.at <= now && !r.finish.containsKey(j.id))
+                    .min(Comparator.<Job>comparingInt(j -> j.pri).thenComparingInt(j -> j.at).thenComparingInt(j -> j.order));
             int nextArrival = jobs.stream().filter(j -> j.at > now).mapToInt(j -> j.at).min().orElse(Integer.MAX_VALUE);
             if (!next.isPresent()) { addSegment(r, null, t, nextArrival); t = nextArrival; continue; }
             Job j = next.get();

@@ -686,6 +686,8 @@ public abstract class FigmaModule extends ModulePanel {
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             setAlignmentX(LEFT_ALIGNMENT);
             addActionListener(e -> {
+                // the button can fire after the page was rebuilt or scrolled away; a popup needs it on screen
+                if (!isShowing()) return;
                 JPopupMenu menu = new JPopupMenu();
                 menu.setBorder(new javax.swing.border.LineBorder(Theme.inputLine(), 1));
                 for (String o : options) {
@@ -954,6 +956,144 @@ public abstract class FigmaModule extends ModulePanel {
             g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 190));
             g2.fillRoundRect(r.x + 1, r.y + 1, Math.max(4, r.width - 2), Math.max(4, r.height - 2), 8, 8);
             g2.dispose();
+        }
+    }
+
+    // ============================ "HOW IT WAS COMPUTED" ============================
+
+    /**
+     * Collapsible "HOW IT WAS COMPUTED" section: the steps the algorithm took, numbered, in plain words.
+     * Scrolls when there are more than 14 steps; very long runs are cut at 400 steps.
+     */
+    protected static JComponent explainSection(java.util.List<String> steps) {
+        JPanel list = new JPanel();
+        list.setOpaque(false);
+        list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
+        int shown = Math.min(steps.size(), 400);
+        int numW = String.valueOf(shown).length();
+        for (int i = 0; i < shown; i++) {
+            JLabel l = body(String.format("%" + numW + "d.  %s", i + 1, steps.get(i)), 12.5f, Theme.text());
+            l.setBorder(new EmptyBorder(2, 4, 2, 4));
+            list.add(l);
+        }
+        if (steps.size() > shown)
+            list.add(body("... and " + (steps.size() - shown) + " more steps", 12, Theme.muted()));
+        JComponent body = list;
+        if (shown > 14) {
+            JScrollPane sp = new JScrollPane(list, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                    ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+            sp.setOpaque(false);
+            sp.getViewport().setOpaque(false);
+            sp.setBorder(null);
+            styleScrollPane(sp);
+            sp.getVerticalScrollBar().setUnitIncrement(20);
+            int h = 14 * (list.getComponent(0).getPreferredSize().height);
+            sp.setPreferredSize(new Dimension(300, h));
+            sp.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
+            sp.setAlignmentX(LEFT_ALIGNMENT);
+            body = sp;
+        }
+        JPanel wrap = new JPanel();
+        wrap.setOpaque(false);
+        wrap.setLayout(new BoxLayout(wrap, BoxLayout.Y_AXIS));
+        wrap.setAlignmentX(LEFT_ALIGNMENT);
+        wrap.add(Box.createVerticalStrut(14));
+        wrap.add(collapsibleSection("HOW IT WAS COMPUTED", body));
+        return wrap;
+    }
+
+    // ============================ INPUT TOOLBAR (Sample / Large / Random / History / Undo / Clear) ============================
+
+    /** A row of dashed pills that wraps onto the next line when the page is narrow. */
+    protected static JPanel pillRow(int top, JComponent... items) {
+        JPanel row = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 6));
+        row.setOpaque(false);
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.setBorder(new EmptyBorder(top, 0, 0, 0));
+        for (JComponent c : items) row.add(c);
+        return row;
+    }
+
+    /** A dashed pill that runs the given action when clicked. */
+    protected static DashedPill pill(String label, Runnable action) {
+        DashedPill p = new DashedPill(label);
+        p.addActionListener(e -> action.run());
+        return p;
+    }
+
+    /** FlowLayout that reports the height it really needs when its items wrap onto several lines. */
+    public static class WrapLayout extends FlowLayout {
+        private static final long serialVersionUID = 1L;
+        public WrapLayout(int align, int hgap, int vgap) { super(align, hgap, vgap); }
+        @Override public Dimension preferredLayoutSize(Container target) { return size(target, true); }
+        @Override public Dimension minimumLayoutSize(Container target) { return size(target, false); }
+        private Dimension size(Container target, boolean preferred) {
+            synchronized (target.getTreeLock()) {
+                int maxW = target.getWidth();
+                Container c = target;
+                while (maxW == 0 && c.getParent() != null) { c = c.getParent(); maxW = c.getWidth(); }
+                if (maxW == 0) maxW = Integer.MAX_VALUE;
+                Insets in = target.getInsets();
+                maxW -= in.left + in.right + getHgap() * 2;
+                int w = 0, h = 0, rowW = 0, rowH = 0;
+                for (Component m : target.getComponents()) {
+                    if (!m.isVisible()) continue;
+                    Dimension d = preferred ? m.getPreferredSize() : m.getMinimumSize();
+                    if (rowW > 0 && rowW + getHgap() + d.width > maxW) {
+                        w = Math.max(w, rowW); h += rowH + getVgap(); rowW = 0; rowH = 0;
+                    }
+                    rowW += (rowW > 0 ? getHgap() : 0) + d.width;
+                    rowH = Math.max(rowH, d.height);
+                }
+                w = Math.max(w, rowW); h += rowH;
+                return new Dimension(w + in.left + in.right + getHgap() * 2, h + in.top + in.bottom + getVgap() * 2);
+            }
+        }
+    }
+
+    /**
+     * Undo stack + "History" of recent runs for a module's inputs. S is an immutable snapshot of the inputs.
+     * Undo keeps the last 15 changes; History keeps the last 6 distinct runs (newest first).
+     */
+    public static class InputHistory<S> {
+        private final java.util.Deque<S> undo = new java.util.ArrayDeque<>();
+        private final java.util.List<java.util.Map.Entry<String, S>> runs = new java.util.ArrayList<>();
+
+        /** Call before changing the inputs, with a snapshot of how they are now. */
+        public void push(S before) {
+            undo.push(before);
+            if (undo.size() > 15) undo.removeLast();
+        }
+
+        /** Restores the last snapshot (or shows "Nothing to undo"). */
+        public void undo(Component anchor, java.util.function.Consumer<S> restore) {
+            if (undo.isEmpty()) { showToast(anchor, "Nothing to undo"); return; }
+            restore.accept(undo.pop());
+            showToast(anchor, "Undid last change");
+        }
+
+        /** Remembers a successful run; the same label is only kept once. */
+        public void record(String label, S state) {
+            runs.removeIf(e -> e.getKey().equals(label));
+            runs.add(0, java.util.Map.entry(label, state));
+            if (runs.size() > 6) runs.remove(runs.size() - 1);
+        }
+
+        /** Pop-up list of recent runs under the History pill; picking one restores it. */
+        public void showMenu(JComponent invoker, java.util.function.Consumer<S> restore) {
+            if (runs.isEmpty()) { showToast(invoker, "No recent runs yet - press RUN SIMULATION first"); return; }
+            JPopupMenu menu = new JPopupMenu();
+            menu.setBorder(BorderFactory.createLineBorder(Theme.inputLine(), 1));
+            for (java.util.Map.Entry<String, S> run : runs) {
+                JMenuItem mi = new JMenuItem(run.getKey());
+                mi.setFont(Fonts.body(13f));
+                mi.setBackground(Theme.input());
+                mi.setForeground(Theme.text());
+                mi.setBorder(new EmptyBorder(6, 12, 6, 14));
+                mi.addActionListener(e -> { restore.accept(run.getValue()); showToast(invoker, "Restored from history"); });
+                menu.add(mi);
+            }
+            if (invoker.isShowing()) menu.show(invoker, 0, invoker.getHeight());
         }
     }
 }

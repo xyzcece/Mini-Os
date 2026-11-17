@@ -61,7 +61,7 @@ public class ReplacementModule extends FigmaModule {
 
         JPanel tools = new JPanel();
         tools.setOpaque(false);
-        tools.setLayout(new BoxLayout(tools, BoxLayout.X_AXIS));
+        tools.setLayout(new WrapLayout(FlowLayout.LEFT, 0, 6));   // wraps onto a 2nd line when narrow
         tools.setBorder(new EmptyBorder(10, 0, 0, 0));
 
         DashedPill sampleBtn = new DashedPill("Sample data");
@@ -141,6 +141,16 @@ public class ReplacementModule extends FigmaModule {
         tools.add(undoBtn);
         tools.add(Box.createHorizontalStrut(8));
         tools.add(clearBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        DashedPill badBtn = new DashedPill("Invalid input test");
+        badBtn.addActionListener(e -> {
+            pushUndo();
+            setFields("7 0 -1 2 0", "0");
+            hasRun = true;
+            rerun();
+            showToast(this, "Loaded bad input - the result card shows what to fix");
+        });
+        tools.add(badBtn);
         tools.add(Box.createHorizontalStrut(12));
         tools.add(countBadge);
         p.add(tools, BorderLayout.SOUTH);
@@ -194,18 +204,30 @@ public class ReplacementModule extends FigmaModule {
 
         List<String> refs = null;
         int numFrames = 0;
-        boolean bad = false;
+        List<String> problems = new ArrayList<>();
         try {
             refs = parseRefs(reference.getText());
-        } catch (IllegalArgumentException e) { reference.setInvalid(true); bad = true; }
-        try {
-            numFrames = Integer.parseInt(frames.getText().trim());
-            if (numFrames < 1) throw new IllegalArgumentException();
-        } catch (IllegalArgumentException e) { frames.setInvalid(true); bad = true; }
+            for (String pg : refs)
+                if (pg.matches("-\\d+")) { problems.add("page " + pg + " is negative - page numbers are 0 or more"); reference.setInvalid(true); break; }
+        } catch (IllegalArgumentException e) {
+            reference.setInvalid(true);
+            problems.add("the reference string is blank - type the pages, e.g. 7 0 1 2 0 3");
+        }
+        String ft = frames.getText().trim();
+        if (ft.isEmpty()) problems.add("the frame count is blank");
+        else {
+            try {
+                numFrames = Integer.parseInt(ft);
+                if (numFrames < 1) problems.add("the frame count is " + numFrames + " - it must be 1 or more");
+            } catch (NumberFormatException e) { problems.add("the frame count (\"" + ft + "\") is not a whole number"); }
+        }
+        if (ft.isEmpty() || numFrames < 1) frames.setInvalid(true);
 
-        if (bad) {
-            r.add(new Notice(false, "Input check",
-                    "enter at least one page reference and a positive frame count (1 or more)."));
+        if (!problems.isEmpty()) {
+            r.add(new Notice(false, "Input check", problems.get(0)));
+            for (int i = 1; i < problems.size(); i++) { r.add(Box.createVerticalStrut(6)); r.add(new Notice(false, "Also", problems.get(i))); }
+            r.add(Box.createVerticalStrut(6));
+            r.add(body("Rule: at least one page reference (0 or more), and a frame count of 1 or more.", 12, Theme.muted()));
             return;
         }
 
@@ -286,6 +308,7 @@ public class ReplacementModule extends FigmaModule {
             };
         }
         r.add(collapsibleSection("COMPARE ALL ALGORITHMS", new CompareTable(cmp, current, faultsArr, minFaults)));
+        r.add(explainSection(explain(algo, refs, numFrames, res)));
 
         if (maxFaults > minFaults) {
             r.add(Box.createVerticalStrut(10));
@@ -335,7 +358,7 @@ public class ReplacementModule extends FigmaModule {
             });
             menu.add(mi);
         }
-        menu.show(invoker, 0, invoker.getHeight());
+        if (invoker.isShowing()) menu.show(invoker, 0, invoker.getHeight());
     }
 
     static List<String> parseRefs(String raw) {
@@ -407,6 +430,51 @@ public class ReplacementModule extends FigmaModule {
             }
         }
         return r;
+    }
+
+    /** One line per reference: hit, fault into an empty frame, or which page was replaced and why. */
+    static List<String> explain(String algo, List<String> refs, int numFrames, Result res) {
+        List<String> out = new ArrayList<>();
+        out.add(switch (algo) {
+            case "LRU" -> "Rule (LRU): on a fault with all frames full, replace the page that was used longest ago.";
+            case "Optimal" -> "Rule (Optimal): on a fault with all frames full, replace the page that will not be needed for the longest time (or never again).";
+            default -> "Rule (FIFO): on a fault with all frames full, replace the page that was loaded first.";
+        });
+        for (int step = 0; step < refs.size(); step++) {
+            String page = refs.get(step);
+            int slot = res.activeSlot[step];
+            if (res.hit[step]) {
+                out.add(String.format("Ref %d = %s: already in frame %d → HIT.", step + 1, page, slot + 1));
+                continue;
+            }
+            String old = step == 0 ? null : res.grid[slot][step - 1];
+            if (old == null) {
+                out.add(String.format("Ref %d = %s: not in memory → FAULT; frame %d is empty, load %s there.", step + 1, page, slot + 1, page));
+                continue;
+            }
+            String why = switch (algo) {
+                case "LRU" -> {
+                    int last = -1;
+                    for (int k = step - 1; k >= 0; k--) if (refs.get(k).equals(old)) { last = k; break; }
+                    yield old + " was used longest ago (ref " + (last + 1) + ")";
+                }
+                case "Optimal" -> {
+                    int next = -1;
+                    for (int k = step + 1; k < refs.size(); k++) if (refs.get(k).equals(old)) { next = k; break; }
+                    yield next < 0 ? old + " is never used again" : old + " is not needed until ref " + (next + 1) + ", the latest of the pages in memory";
+                }
+                default -> {
+                    int loaded = 0;
+                    for (int k = step - 1; k >= 0; k--) if (res.grid[slot][k] == null || !res.grid[slot][k].equals(old)) { loaded = k + 1; break; }
+                    yield old + " has been in memory the longest (loaded at ref " + (loaded + 1) + ")";
+                }
+            };
+            out.add(String.format("Ref %d = %s: not in memory → FAULT; frames full, %s → replace %s in frame %d.",
+                    step + 1, page, why, old, slot + 1));
+        }
+        out.add(String.format("Total: %d faults + %d hits = %d references; fault rate = %d ÷ %d = %.1f%%.",
+                res.faults, res.hits, refs.size(), res.faults, refs.size(), 100.0 * res.faults / refs.size()));
+        return out;
     }
 
     private static int pickVictim(String algo, String[] slots, int[] loadedAt, int[] lastUsed,

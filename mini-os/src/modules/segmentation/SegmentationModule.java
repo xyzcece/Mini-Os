@@ -4,17 +4,25 @@ import java.awt.*;
 import java.awt.geom.RoundRectangle2D;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.TreeSet;
 import javax.swing.*;
+import modules.common.EntryGrid;
 import modules.common.FigmaModule;
 import shared.Fonts;
 import shared.Theme;
 
 /**
  * SEGMENTATION  —  OWNER: Member 1
- *   [x] Segment table input (limit, base), segment number, offset
+ *   [x] Segment table input: a scrolling table (SEG / LIMIT / BASE, one row per segment),
+ *       with +1 / +5 / −1 / [count] Set / Paste / Bulk - any number of segments
+ *   [x] Segment number + offset to translate
  *   [x] Logical space + segment table + physical memory map
  *   [x] Translation: offset < limit ? base + offset : invalid
+ *   [x] Toolbar:
+ *       Sample data, Out-of-range sample, Large sample (12 segments), Random, Invalid input test,
+ *       History (recent runs), Undo, Clear
+ *   [x] Validation: blank, letters, limit <= 0, negative base/offset - the bad cell turns red, never crashes
  * CHECK: Segment 2, offset 53 -> physical 4353
  *        Segment 1, offset 500 -> invalid (500 is not < limit 400)
  *
@@ -25,10 +33,21 @@ public class SegmentationModule extends FigmaModule {
 
     /** Names from the class example (logical address space). Extra segments get "segment N". */
     static final String[] NAMES = {"subroutine", "sqrt", "main program", "stack", "symbol table"};
-    /** Class example to type in: segment 2, offset 53 -> 4353. Fields start empty. */
-    static final String EXAMPLE_TABLE = "1000,1400; 400,6300; 400,4300; 1100,3200; 1000,4700";
+    /** Class example as {limit, base}: segment 2, offset 53 -> 4353. Fields start empty. */
+    static final String[][] EXAMPLE = {{"1000", "1400"}, {"400", "6300"}, {"400", "4300"}, {"1100", "3200"}, {"1000", "4700"}};
+    /** Exceptional case: a letter, a negative limit and a missing base. */
+    static final String[][] BAD = {{"1000", "1400"}, {"abc", "6300"}, {"-5", "4300"}, {"700", ""}};
 
-    private JTextField tableField, segField, offsetField;
+    /** Segments as {limit, base}; segment # is the position (0..n-1). Starts with 5 empty segments. */
+    private final transient EntryGrid grid = new EntryGrid("SEG", new String[]{"LIMIT", "BASE"}, String::valueOf, 62, this::onRunPressed)
+            .alwaysTable();
+    { grid.resize(5); }
+    private String segText = "", offsetText = "";
+    private RoundField segField, offsetField;
+
+    /** Everything the person typed, for Undo and History. */
+    private record State(List<String[]> segs, String seg, String offset) {}
+    private final transient InputHistory<State> history = new InputHistory<>();
 
     @Override public String title()    { return "Segmentation"; }
     @Override public String subtitle() { return "Validate offsets against base and limit pairs."; }
@@ -38,34 +57,126 @@ public class SegmentationModule extends FigmaModule {
     // ============================ INPUTS ============================
 
     @Override protected void buildInputs(JPanel p) {
-        tableField  = new RoundField(tableField  == null ? "" : tableField.getText());
-        segField    = new RoundField(segField    == null ? "" : segField.getText());
-        offsetField = new RoundField(offsetField == null ? "" : offsetField.getText());
+        saveFields();   // keep what was typed (theme change, add/remove segment)
 
-        // 3 columns sized 2.4fr / 1fr / 1fr with a 14px gap, like the design grid
-        JPanel grid = new JPanel(null) {
-            private static final long serialVersionUID = 1L;
-            final double[] fr = {2.4, 1, 1};
-            @Override public void doLayout() {
-                int gap = 14, avail = getWidth() - gap * 2, x = 0;
-                for (int i = 0; i < getComponentCount(); i++) {
-                    int w = (int) Math.round(avail * fr[i] / 4.4);
-                    Component c = getComponent(i);
-                    c.setBounds(x, 0, w, c.getPreferredSize().height);
-                    x += w + gap;
-                }
-            }
-            @Override public Dimension getPreferredSize() {
-                int h = 0;
-                for (Component c : getComponents()) h = Math.max(h, c.getPreferredSize().height);
-                return new Dimension(300, h);
-            }
-        };
-        grid.setOpaque(false);
-        grid.add(field("Segment table (limit, base)", tableField, "limit, base; limit, base"));
-        grid.add(field("Segment number", segField, null));
-        grid.add(field("Offset", offsetField, null));
-        p.add(grid, BorderLayout.CENTER);
+        segField = new RoundField(segText);
+        offsetField = new RoundField(offsetText);
+        segField.addActionListener(e -> onRunPressed());
+        offsetField.addActionListener(e -> onRunPressed());
+
+        JPanel address = new JPanel(new GridLayout(1, 2, 14, 0));
+        address.setOpaque(false);
+        address.setAlignmentX(LEFT_ALIGNMENT);
+        address.add(field("Segment number", segField, "0 to " + Math.max(0, grid.size() - 1)));
+        address.add(field("Offset", offsetField, "must be less than the segment's limit"));
+
+        JPanel stack = new JPanel();
+        stack.setOpaque(false);
+        stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
+        JComponent table = tableBox();
+        table.setAlignmentX(LEFT_ALIGNMENT);
+        stack.add(table);
+        stack.add(Box.createVerticalStrut(14));
+        stack.add(address);
+        p.add(stack, BorderLayout.CENTER);
+        p.add(toolbar(), BorderLayout.SOUTH);
+    }
+
+    /** "SEGMENT TABLE" box: a scrolling table (one row per segment) and the +1 / +5 / −1 / Set / Paste row. */
+    private JComponent tableBox() {
+        return grid.box("SEGMENT TABLE", "segment", "one per segment", "physical address = base + offset",
+                this::resizeSegments, this::bulkLoad);
+    }
+
+    /** +1 / +5 / −1 / Set: changes the number of segments, keeping what was typed (with Undo). */
+    private void resizeSegments(int n) {
+        history.push(snapshot());
+        grid.resize(n);
+        rebuildInputs();
+        showToast(this, grid.size() + (grid.size() == 1 ? " segment" : " segments"));
+    }
+
+    /** Paste / Bulk: replaces the table with the pasted "limit, base" lines (with Undo) and runs it. */
+    private void bulkLoad(List<String[]> pasted) {
+        history.push(snapshot());
+        grid.setRows(pasted);
+        rebuildInputs();
+        rerun();
+        showToast(this, "Imported " + pasted.size() + " segments");
+    }
+
+    /** Sample / Out-of-range / Large / Random / Invalid input / History / Undo / Clear pills. */
+    private JComponent toolbar() {
+        DashedPill hist = new DashedPill("History");
+        hist.addActionListener(e -> history.showMenu(hist, this::restore));
+        return pillRow(10,
+                pill("Sample data (VALID)", () -> load(rows(EXAMPLE), "2", "53",
+                        "Loaded the class example: segment 2, offset 53")),
+                pill("Out-of-range sample", () -> load(rows(EXAMPLE), "1", "500",
+                        "Loaded segment 1, offset 500 (limit is 400)")),
+                pill("Large sample (12 segments)", () -> loadRandom(12, new Random(7), "Loaded 12 segments")),
+                pill("Random", () -> loadRandom(grid.size(), new Random(), "Generated " + grid.size() + " random segments")),
+                pill("Invalid input test", () -> load(rows(BAD), "x", "-1",
+                        "Loaded bad input - the red cells show what to fix")),
+                hist,
+                pill("Undo", () -> history.undo(this, this::restore)),
+                pill("Clear", () -> load(blank(grid.size()), "", "", "Cleared all fields")));
+    }
+
+    // ---------- input plumbing ----------
+
+    private static List<String[]> blank(int n) {
+        List<String[]> l = new ArrayList<>();
+        for (int i = 0; i < n; i++) l.add(new String[]{"", ""});
+        return l;
+    }
+
+    private static List<String[]> rows(String[][] data) {
+        List<String[]> l = new ArrayList<>();
+        for (String[] r : data) l.add(r.clone());
+        return l;
+    }
+
+    /** Copies whatever is typed in the fields back into the grid / segText / offsetText. */
+    private void saveFields() {
+        if (segField != null) segText = segField.getText().trim();
+        if (offsetField != null) offsetText = offsetField.getText().trim();
+        grid.save();
+    }
+
+    private State snapshot() {
+        saveFields();
+        return new State(grid.copy(), segText, offsetText);
+    }
+
+    /** Puts a snapshot back on screen and runs it. */
+    private void restore(State st) {
+        grid.setRows(st.segs());   // drops the old cells so they are not copied back over the new data
+        segText = st.seg();
+        offsetText = st.offset();
+        segField = offsetField = null;
+        rebuildInputs();
+        rerun();
+    }
+
+    private void load(List<String[]> table, String seg, String offset, String toast) {
+        history.push(snapshot());
+        restore(new State(table, seg, offset));
+        showToast(this, toast);
+    }
+
+    /** n segments packed one after another (with small random gaps) from address 1000. */
+    private void loadRandom(int n, Random rng, String toast) {
+        List<String[]> t = new ArrayList<>();
+        int base = 1000;
+        for (int i = 0; i < n; i++) {
+            int limit = 100 * (1 + rng.nextInt(15));   // 100 .. 1500
+            t.add(new String[]{String.valueOf(limit), String.valueOf(base)});
+            base += limit + 100 * rng.nextInt(4);      // gap of 0 .. 300 before the next segment
+        }
+        int seg = rng.nextInt(n);
+        int offset = rng.nextInt(Integer.parseInt(t.get(seg)[0]) + 200);   // sometimes past the limit, to show the trap
+        load(t, String.valueOf(seg), String.valueOf(offset), toast);
     }
 
     private JPanel field(String label, JTextField f, String hint) {
@@ -85,25 +196,47 @@ public class SegmentationModule extends FigmaModule {
     // ============================ RESULTS ============================
 
     @Override protected void runSimulation(JPanel r) {
+        saveFields();
+        grid.clearInvalid();
+        if (segField != null) { segField.setInvalid(false); offsetField.setInvalid(false); }
+
         r.add(pixelText("SIMULATION OUTPUT · EXAMPLE OF SEGMENTATION", 7f, Theme.text(), 0f));
         r.add(Box.createVerticalStrut(12));
 
-        if (allBlank(tableField, segField, offsetField)) {
-            r.add(Notice.prompt("Type the segment table, a segment number and an offset, then press RUN SIMULATION."));
+        boolean nothingTyped = segText.isEmpty() && offsetText.isEmpty()
+                && grid.rows().stream().allMatch(s -> s[0].isEmpty() && s[1].isEmpty());
+        if (nothingTyped) {
+            r.add(Notice.prompt("Fill in each segment's LIMIT and BASE, a segment number and an offset, then press RUN SIMULATION."));
             return;
         }
 
-        List<int[]> table;   // each entry: {limit, base}
-        int seg, offset;
-        try {
-            table = parseTable(tableField.getText());
-            seg = Integer.parseInt(segField.getText().trim());
-            offset = Integer.parseInt(offsetField.getText().trim());
-        } catch (IllegalArgumentException e) {   // also covers NumberFormatException
-            r.add(new Notice(false, "Input check",
-                    "write the table as  limit,base; limit,base  with whole numbers (limit > 0, base ≥ 0)"));
+        // read everything, collecting every problem (and turning the bad cells red)
+        List<String> problems = new ArrayList<>();
+        List<int[]> table = new ArrayList<>();   // each entry: {limit, base}
+        List<String[]> segs = grid.rows();
+        for (int i = 0; i < segs.size(); i++) {
+            Integer limit = read(segs.get(i)[0], "segment " + i + " LIMIT", 1, i, 0, problems);
+            Integer base = read(segs.get(i)[1], "segment " + i + " BASE", 0, i, 1, problems);
+            table.add(new int[]{limit == null ? 0 : limit, base == null ? 0 : base});
+        }
+        Integer segN = read(segText, "the segment number", Integer.MIN_VALUE, -1, 0, problems);
+        Integer offN = read(offsetText, "the offset", 0, -1, 1, problems);
+
+        if (!problems.isEmpty()) {
+            r.add(new Notice(false, "Input check", problems.get(0)));
+            for (int i = 1; i < Math.min(problems.size(), 4); i++) {
+                r.add(Box.createVerticalStrut(6));
+                r.add(new Notice(false, "Also", problems.get(i)));
+            }
+            if (problems.size() > 4) {
+                r.add(Box.createVerticalStrut(6));
+                r.add(body("... and " + (problems.size() - 4) + " more cell(s) to fix.", 12, Theme.muted()));
+            }
+            r.add(Box.createVerticalStrut(6));
+            r.add(body("Rule: every LIMIT is a whole number more than 0; every BASE and the offset are 0 or more.", 12, Theme.muted()));
             return;
         }
+        int seg = segN, offset = offN;
 
         // 1) the answer
         int physical = -1;
@@ -125,6 +258,29 @@ public class SegmentationModule extends FigmaModule {
         }
         r.add(Box.createVerticalStrut(12));
 
+        List<String> how = new ArrayList<>();
+        how.add("A logical address is (segment number, offset). The segment table gives each segment's base "
+                + "(where it starts in memory) and limit (its length).");
+        if (seg < 0 || seg >= table.size()) {
+            how.add(String.format("The table has segments 0 to %d. Segment %d does not exist, so the hardware traps "
+                    + "(addressing error) and the OS stops the process.", table.size() - 1, seg));
+        } else {
+            int limit = table.get(seg)[0], base = table.get(seg)[1];
+            how.add(String.format("Segment %d: base %d, limit %d, so its legal offsets are 0 to %d.", seg, base, limit, limit - 1));
+            if (offset < limit) {
+                how.add(String.format("Offset %d < limit %d → the address is legal.", offset, limit));
+                how.add(String.format("physical = base + offset = %d + %d = %d.", base, offset, base + offset));
+                how.add(String.format("Check: segment %d occupies physical %d to %d, and %d is inside it.",
+                        seg, base, base + limit - 1, base + offset));
+            } else {
+                how.add(String.format("Offset %d is not < limit %d → it would reach past the end of the segment, "
+                        + "so the hardware traps (addressing error) and no physical address is made.", offset, limit));
+            }
+        }
+
+        history.record(String.format("%d segments · seg %d, offset %d → %s", table.size(), seg, offset,
+                physical >= 0 ? String.valueOf(physical) : "trap"), snapshot());
+
         // 2) logical space, segment table, physical memory (spread across the row)
         Row row = new Row(new GridBagLayout());
         GridBagConstraints gc = new GridBagConstraints();
@@ -135,20 +291,32 @@ public class SegmentationModule extends FigmaModule {
         gc.weightx = 1; row.add(Box.createHorizontalStrut(8), gc); gc.weightx = 0;
         row.add(column(new MemoryMap(table, seg, physical), "physical memory"), gc);
         r.add(row);
+        r.add(explainSection(how));
     }
 
-    static List<int[]> parseTable(String s) {
-        List<int[]> t = new ArrayList<>();
-        for (String part : s.split(";")) {
-            if (part.trim().isEmpty()) continue;
-            String[] lb = part.split(",");
-            if (lb.length != 2) throw new IllegalArgumentException(part);
-            int limit = Integer.parseInt(lb[0].trim()), base = Integer.parseInt(lb[1].trim());
-            if (limit <= 0 || base < 0) throw new IllegalArgumentException(part);
-            t.add(new int[]{limit, base});
+    /**
+     * Reads one whole number. If it is blank, not a number or below min, adds a message to problems,
+     * turns its field red and returns null. segIdx >= 0 means a table cell (col 0 = LIMIT, 1 = BASE);
+     * segIdx -1 means the segment number (col 0) or the offset (col 1).
+     */
+    private Integer read(String s, String what, int min, int segIdx, int col, List<String> problems) {
+        RoundField f = segIdx >= 0 ? null : (col == 0 ? segField : offsetField);
+        String msg = null;
+        Integer v = null;
+        if (s.isBlank()) msg = what + " is blank";
+        else {
+            try {
+                v = Integer.parseInt(s.trim());
+                if (v < min) msg = what + " is " + v + (min == 1 ? " - a limit must be more than 0" : " - it cannot be negative");
+            } catch (NumberFormatException e) {
+                msg = what + " (\"" + s.trim() + "\") is not a whole number";
+            }
         }
-        if (t.isEmpty()) throw new IllegalArgumentException();
-        return t;
+        if (msg == null) return v;
+        problems.add(msg);
+        if (segIdx >= 0) grid.markInvalid(segIdx, col);
+        else if (f != null) f.setInvalid(true);
+        return null;
     }
 
     static String name(int i) { return i < NAMES.length ? NAMES[i] : "segment " + i; }
