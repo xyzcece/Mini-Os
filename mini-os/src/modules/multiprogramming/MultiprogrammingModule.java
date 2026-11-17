@@ -101,7 +101,7 @@ public class MultiprogrammingModule extends FigmaModule {
         // Quick preset pills underneath
         JPanel tools = new JPanel();
         tools.setOpaque(false);
-        tools.setLayout(new BoxLayout(tools, BoxLayout.X_AXIS));
+        tools.setLayout(new WrapLayout(FlowLayout.LEFT, 0, 6));   // wraps onto a 2nd line when narrow
         tools.setBorder(new EmptyBorder(10, 0, 0, 0));
 
         DashedPill teacherBtn = new DashedPill("Sample (Teacher 7.4–9.1)");
@@ -169,6 +169,15 @@ public class MultiprogrammingModule extends FigmaModule {
         tools.add(undoBtn);
         tools.add(Box.createHorizontalStrut(8));
         tools.add(clearBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        DashedPill badBtn = new DashedPill("Invalid input test");
+        badBtn.addActionListener(e -> {
+            pushUndo();
+            hasRun = true;
+            loadPreset(new String[][]{{"7.4", "0.4"}, {"abc", "0.3"}, {"7.6", "-1"}, {"8.0", ""}}, "150", "");
+            showToast(this, "Loaded bad input - the result card shows what to fix");
+        });
+        tools.add(badBtn);
         p.add(tools, BorderLayout.SOUTH);
     }
 
@@ -469,20 +478,29 @@ public class MultiprogrammingModule extends FigmaModule {
         boolean clockMode = false;
         String startRaw = startText.trim();
         boolean bad = false;
+        List<String> problems = new ArrayList<>();
+        boolean startOk = true;
         try {
             boolean anyColon = false;
             for (String[] j : jobs) if (j[0].contains(":")) { anyColon = true; break; }
             clockMode = startRaw.isEmpty() ? anyColon : startRaw.contains(":");
             parsedStart = startRaw.isEmpty() ? 0.0 : parseStartTime(startRaw);
-        } catch (IllegalArgumentException e) { if (start != null) start.setInvalid(true); bad = true; }
+        } catch (IllegalArgumentException e) {
+            if (start != null) start.setInvalid(true); bad = true; startOk = false;
+            problems.add("the start time (\"" + startRaw + "\") is not a time like 7.4 or 10:00");
+        }
         try {
             p = parseIoWait(ioWaitText);
-        } catch (IllegalArgumentException e) { if (ioWait != null) ioWait.setInvalid(true); bad = true; }
+        } catch (IllegalArgumentException e) {
+            if (ioWait != null) ioWait.setInvalid(true); bad = true;
+            problems.add("the I/O wait (\"" + ioWaitText.trim() + "\") must be a number from 0% to 99.9%");
+        }
 
         List<Job> jobList = null;
-        if (!bad) {
+        {   // check the jobs even when another field is wrong, so every problem shows at once
+            boolean startGiven = !startRaw.isEmpty() && startOk;
             try {
-                jobList = parseJobRows(jobs, parsedStart, clockMode, !startRaw.isEmpty());
+                jobList = parseJobRows(jobs, parsedStart, clockMode, startGiven);
                 if (startRaw.isEmpty()) {
                     double earliest = jobList.get(0).arrivalMin;
                     for (Job j : jobList) earliest = Math.min(earliest, j.arrivalMin);
@@ -491,13 +509,17 @@ public class MultiprogrammingModule extends FigmaModule {
                     startMin = parsedStart;
                 }
             } catch (IllegalArgumentException e) {
-                markInvalidJobFields(parsedStart, clockMode, !startRaw.isEmpty());
+                markInvalidJobFields(parsedStart, clockMode, startGiven);
                 bad = true;
+                problems.add(jobProblem(e.getMessage()));
             }
         }
         if (bad) {
-            r.add(new Notice(false, "Input check",
-                    "enter valid numbers (AT >= start time, BT > 0) for each job, and I/O wait between 0% and 99.9%."));
+            r.add(new Notice(false, "Input check", problems.isEmpty() ? "check the highlighted fields" : problems.get(0)));
+            for (int i = 1; i < problems.size(); i++) { r.add(Box.createVerticalStrut(6)); r.add(new Notice(false, "Also", problems.get(i))); }
+            r.add(Box.createVerticalStrut(6));
+            r.add(body("Rule: every job needs AT (not before the start time) and BT more than 0; I/O wait is 0% to 99.9%.",
+                    12, Theme.muted()));
             return;
         }
 
@@ -557,6 +579,7 @@ public class MultiprogrammingModule extends FigmaModule {
             };
         }
         r.add(collapsibleSection("JOB COMPLETION SUMMARY", cappedScroll(new JobSummaryTable(summary), 320)));
+        r.add(explainSection(explain(res, p, startMin, clockMode)));
 
         r.add(Box.createVerticalStrut(10));
         StringBuilder sbCopy = new StringBuilder();
@@ -624,7 +647,7 @@ public class MultiprogrammingModule extends FigmaModule {
             });
             menu.add(mi);
         }
-        menu.show(invoker, 0, invoker.getHeight());
+        if (invoker.isShowing()) menu.show(invoker, 0, invoker.getHeight());
     }
 
     private static JComponent cappedScroll(JComponent comp, int maxH) {
@@ -664,6 +687,15 @@ public class MultiprogrammingModule extends FigmaModule {
         double p = (hasPct || val > 1.0) ? val / 100.0 : val;
         if (p < 0 || p >= 1.0) throw new IllegalArgumentException("ioWait out of range");
         return p;
+    }
+
+    /** Turns parseJobRows' short error into a sentence for the Input check notice. */
+    private static String jobProblem(String msg) {
+        if (msg == null) return "a job has a value that is not a number";
+        if (msg.startsWith("incomplete job ")) return "job " + msg.substring(15) + " is missing its AT or BT";
+        if (msg.startsWith("invalid job ")) return "job " + msg.substring(12) + ": AT must be 0 or more (and not before the start time) and BT more than 0";
+        if (msg.equals("empty jobs")) return "there are no jobs - type AT and BT for at least one job";
+        return "a job has a value that is not a number (" + msg.replace("For input string: ", "") + ")";
     }
 
     static List<Job> parseJobRows(List<String[]> rows, double startMin, boolean clockMode, boolean hasExplicitStart) {
@@ -790,6 +822,24 @@ public class MultiprogrammingModule extends FigmaModule {
         final List<TimelineSlice> slices = new ArrayList<>();
         final Map<Integer, Double> finishTime = new HashMap<>();
         double endTime;
+    }
+
+    /** One line per event: how many jobs share the CPU, the share each gets, and the work done. */
+    static List<String> explain(Result res, double p, double startMin, boolean clockMode) {
+        List<String> out = new ArrayList<>();
+        out.add(String.format("With I/O wait p = %.0f%%, n jobs keep the CPU busy 1 − p^n of the time, so each job gets "
+                + "%%CPU/J = (1 − p^n) ÷ n%s.", p * 100, p == 0 ? " (= 1 ÷ n when p = 0)" : ""));
+        out.add("Between two events: ET = elapsed time, HW/J = ET × %CPU/J = work each job gets done; a job ends when its BT is used up.");
+        double prev = startMin;
+        for (EventRow row : res.rows) {
+            if (row.nj == 0) { out.add(formatTime(row.time, clockMode) + ": " + row.event + " (arrives)."); prev = row.time; continue; }
+            out.add(String.format("%s → %s: %d job%s share the CPU → %%CPU/J = %s, ET = %s, HW/J = %s × %s = %s; %s.",
+                    formatTime(prev, clockMode), formatTime(row.time, clockMode), row.nj, row.nj == 1 ? "" : "s",
+                    fmtRate(row.rate), fmtRate(row.et), fmtRate(row.et), fmtRate(row.rate), fmtRate(row.hw), row.event));
+            prev = row.time;
+        }
+        out.add("Last job done at " + formatTime(res.endTime, clockMode) + ".");
+        return out;
     }
 
     static Result simulate(List<Job> inputJobs, double p, double startMin) {

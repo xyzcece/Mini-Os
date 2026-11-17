@@ -90,7 +90,7 @@ public class FragmentationModule extends FigmaModule {
                 labeled("Process sizes (KB)", processes, "sizes separated by spaces"),
                 labeled("Allocation policy", pick, null)), BorderLayout.CENTER);
 
-        JPanel tools = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
+        JPanel tools = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 6));
         tools.setOpaque(false);
         tools.setBorder(new EmptyBorder(10, 0, 0, 0));
 
@@ -157,6 +157,15 @@ public class FragmentationModule extends FigmaModule {
 
         tools.add(sample); tools.add(large); tools.add(random);
         tools.add(hist); tools.add(undo); tools.add(clear);
+        DashedPill bad = new DashedPill("Invalid input test");
+        bad.addActionListener(e -> {
+            pushUndo();
+            setFields("100 abc 0 300", "212 -5");
+            hasRun = true;
+            rerun();
+            showToast(this, "Loaded bad input - the result card shows what to fix");
+        });
+        tools.add(bad);
         tools.add(Box.createHorizontalStrut(6));
         tools.add(badge);
         p.add(tools, BorderLayout.SOUTH);
@@ -180,7 +189,7 @@ public class FragmentationModule extends FigmaModule {
             int overflow = anchorX + w - root.getWidth() + 8;
             if (overflow > 0) dx = -overflow;
         }
-        menu.show(anchor, dx, anchor.getHeight() - 1);
+        if (anchor.isShowing()) menu.show(anchor, dx, anchor.getHeight() - 1);
     }
 
     JPopupMenu buildPolicyMenu() {
@@ -298,7 +307,7 @@ public class FragmentationModule extends FigmaModule {
             });
             menu.add(mi);
         }
-        menu.show(invoker, 0, invoker.getHeight());
+        if (invoker.isShowing()) menu.show(invoker, 0, invoker.getHeight());
     }
 
     // ============================ RESULTS ============================
@@ -448,6 +457,8 @@ public class FragmentationModule extends FigmaModule {
         }
         for (String p2 : POLICIES)
             if (allocate(p2, blockSizes, procSizes).placed == mostPlaced) tiedOnPlaced++;
+        r.add(explainSection(explain(policy, blockSizes, procSizes, plan)));
+        r.add(Box.createVerticalStrut(10));
         r.add(collapsibleSection("COMPARE ALL " + POLICIES.length + " POLICIES",
                 new DataTable(new String[]{"POLICY", "ALLOCATED", "FREE SPACE", "LARGEST GAP", "BLOCKS USED"},
                         cmp, new int[]{current}, Theme.yellow())));
@@ -615,6 +626,37 @@ public class FragmentationModule extends FigmaModule {
      *   Best Fit  - the block whose remaining room is smallest but still enough.
      *   Worst Fit - the block whose remaining room is largest.
      */
+    /** One line per process: which gaps were big enough, which one the policy picked, what is left. */
+    static List<String> explain(String policy, int[] blockSizes, int[] procSizes, Plan plan) {
+        List<String> out = new ArrayList<>();
+        out.add(switch (policy) {
+            case "Best Fit" -> "Rule (Best Fit): put each process in the smallest gap that is big enough.";
+            case "Worst Fit" -> "Rule (Worst Fit): put each process in the largest gap.";
+            case "Next Fit" -> "Rule (Next Fit): like First Fit, but start looking from the block used last time.";
+            default -> "Rule (First Fit): put each process in the first gap (from Block 0) that is big enough.";
+        });
+        int[] free = blockSizes.clone();
+        for (int i = 0; i < procSizes.length; i++) {
+            List<String> fits = new ArrayList<>();
+            for (int b = 0; b < free.length; b++) if (free[b] >= procSizes[i]) fits.add("Block " + b + " (" + free[b] + ")");
+            int chosen = plan.placedIn[i];
+            String cand = fits.size() > 6 ? String.join(", ", fits.subList(0, 6)) + ", ..." : String.join(", ", fits);
+            if (chosen < 0) {
+                int largest = 0;
+                for (int f : free) largest = Math.max(largest, f);
+                out.add(String.format("P%d (%,d KB): no gap is big enough (largest is %,d KB) → not allocated.", i, procSizes[i], largest));
+                continue;
+            }
+            free[chosen] -= procSizes[i];
+            out.add(String.format("P%d (%,d KB): fits in %s → %s picks Block %d → %,d KB left there.",
+                    i, procSizes[i], cand, policy, chosen, free[chosen]));
+        }
+        out.add(String.format("Free space = %,d KB in %d gap(s), largest %,d KB.", plan.freeSpace, plan.gapCount, plan.largestGap));
+        if (plan.unallocated > 0 && plan.freeSpace > 0)
+            out.add("External fragmentation: there is free memory, but it is split into gaps that are each too small for the waiting process(es).");
+        return out;
+    }
+
     static Plan allocate(String policy, int[] blockSizes, int[] procSizes) {
         Plan plan = new Plan(blockSizes, procSizes);
 

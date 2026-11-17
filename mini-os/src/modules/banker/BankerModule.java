@@ -175,7 +175,7 @@ public class BankerModule extends FigmaModule {
 
     /** Sample / Large / Random / History / Undo / Clear pills. */
     private JComponent toolbar() {
-        JPanel tools = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
+        JPanel tools = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 6));
         tools.setOpaque(false);
         tools.setBorder(new EmptyBorder(6, 0, 0, 0));
 
@@ -232,6 +232,17 @@ public class BankerModule extends FigmaModule {
 
         tools.add(sample); tools.add(unsafe); tools.add(large);
         tools.add(random); tools.add(hist); tools.add(undo); tools.add(clear);
+        DashedPill bad = new DashedPill("Invalid input test");
+        bad.addActionListener(e -> {
+            pushUndo();
+            load(3, 3, new String[]{"3", "x", "1"},
+                    new String[][]{{"1", "0", "2"}, {"-1", "1", "0"}, {"2", "5", ""}},
+                    new String[][]{{"3", "2", "2"}, {"2", "2", "2"}, {"4", "3", "1"}});
+            hasRun = true;
+            rerun();
+            showToast(this, "Loaded bad input - the red cells show what to fix");
+        });
+        tools.add(bad);
         return tools;
     }
 
@@ -367,7 +378,7 @@ public class BankerModule extends FigmaModule {
             mi.addActionListener(e -> { restore(item.state()); showToast(this, "Restored from history"); });
             menu.add(mi);
         }
-        menu.show(invoker, 0, invoker.getHeight());
+        if (invoker.isShowing()) menu.show(invoker, 0, invoker.getHeight());
     }
 
     // ============================ RESULTS ============================
@@ -470,6 +481,8 @@ public class BankerModule extends FigmaModule {
             why.append(".");
             r.add(body(why.toString(), 12, Theme.muted()));
         }
+
+        r.add(explainSection(explain(available, alloc, need, safety)));
 
         r.add(Box.createVerticalStrut(12));
         DashedPill copy = new DashedPill("Copy summary");
@@ -621,6 +634,43 @@ public class BankerModule extends FigmaModule {
         s.finalWork = work;
         for (int i = 0; i < n; i++) if (!finished[i]) s.blocked.add(i);
         return s;
+    }
+
+    /** The safety check replayed in words, including the processes that had to wait on each pass. */
+    static List<String> explain(int[] available, int[][] alloc, int[][] need, Safety safety) {
+        List<String> out = new ArrayList<>();
+        int n = need.length, m = available.length;
+        out.add("Need = Maximum - Allocation for every process (the NEED columns above).");
+        out.add("Start: Work = Available = " + plain(available) + ".");
+        int[] work = available.clone();
+        boolean[] finished = new boolean[n];
+        int done = 0, pass = 0;
+        boolean progress = true;
+        while (progress && done < n) {
+            progress = false;
+            pass++;
+            for (int i = 0; i < n; i++) {
+                if (finished[i]) continue;
+                if (fits(need[i], work)) {
+                    int[] before = work.clone();
+                    for (int j = 0; j < m; j++) work[j] += alloc[i][j];
+                    out.add(String.format("Pass %d: P%d Need %s fits in Work %s → P%d can finish and gives back its Allocation %s → Work = %s.",
+                            pass, i + 1, plain(need[i]), plain(before), i + 1, plain(alloc[i]), plain(work)));
+                    finished[i] = true;
+                    done++;
+                    progress = true;
+                } else {
+                    StringBuilder short_ = new StringBuilder();
+                    for (int j = 0; j < m; j++)
+                        if (need[i][j] > work[j]) short_.append(short_.length() > 0 ? ", " : "").append("R").append(j + 1);
+                    out.add(String.format("Pass %d: P%d Need %s is more than Work %s (not enough %s) → P%d waits.",
+                            pass, i + 1, plain(need[i]), plain(work), short_, i + 1));
+                }
+            }
+        }
+        if (safety.safe) out.add("Every process could finish → SAFE. The order they finished is the safe sequence: " + sequenceText(safety.order) + ".");
+        else out.add("A whole pass went by with nobody able to finish → NOT SAFE. Granting these requests could lead to deadlock.");
+        return out;
     }
 
     private static boolean fits(int[] need, int[] work) {
