@@ -7,17 +7,26 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Loads the 6 Mini OS fonts from the /fonts folder (bundled, so it looks the same on every laptop).
+ * Loads the 6 Mini OS fonts from the /fonts folder (bundled, so it looks the
+ * same on every laptop).
  * OWNER: Member 3.
  */
 public final class Fonts {
-    private Fonts() {}
-    private static final Map<String, Font> cache = new HashMap<>();
+    private Fonts() {
+    }
 
-    /** Resolves a project file whether the working directory is the repo root or mini-os/. */
+    private static final Map<String, Font> cache = new HashMap<>();
+    /** Global UI font scale for projector zoom (0.85 to 1.35). */
+    public static float scale = 1.0f;
+
+    /**
+     * Resolves a project file whether the working directory is the repo root or
+     * mini-os/.
+     */
     public static File file(String path) {
         File f = new File(path);
-        if (f.exists()) return f;
+        if (f.exists())
+            return f;
         File nested = new File("mini-os/" + path);
         return nested.exists() ? nested : f;
     }
@@ -36,19 +45,42 @@ public final class Fonts {
     }
 
     /** Brush-script module titles. */
-    public static Font title(float size)  { return load("Yellowtail-Regular.ttf").deriveFont(size); }
+    public static Font title(float size) {
+        return load("Yellowtail-Regular.ttf").deriveFont(size * scale);
+    }
+
     /** Small arcade labels, RUN SIMULATION, HYPERPUFF. */
-    public static Font arcade(float size) { return load("PressStart2P-Regular.ttf").deriveFont(size); }
+    public static Font arcade(float size) {
+        return load("PressStart2P-Regular.ttf").deriveFont(size * scale);
+    }
+
     /** Table headers and field labels. */
-    public static Font label(float size)  { return load("Silkscreen-Regular.ttf").deriveFont(size); }
+    public static Font label(float size) {
+        return load("Silkscreen-Regular.ttf").deriveFont(size * scale);
+    }
+
     /** Body text, inputs, results, numbers. */
-    public static Font body(float size)   { return load("DotGothic16-Regular.ttf").deriveFont(size); }
+    public static Font body(float size) {
+        return load("DotGothic16-Regular.ttf").deriveFont(size * scale);
+    }
+
     /** "OS Lab" and sidebar module names. */
-    public static Font pixel(float size)  { return load("PixelifySans-Bold.ttf").deriveFont(size); }
+    public static Font pixel(float size) {
+        return load("PixelifySans-Bold.ttf").deriveFont(size * scale);
+    }
+
     /** Clean bold UI text. */
-    public static Font ui(float size)     { return load("Nunito-VariableFont_wght.ttf").deriveFont(Font.BOLD, size); }
+    public static Font ui(float size) {
+        return load("Nunito-VariableFont_wght.ttf").deriveFont(Font.BOLD, size * scale);
+    }
+
     /** Sidebar module names (Nunito Bold). */
-    public static Font uiBold(float size)  { return load("Nunito-Bold.ttf").deriveFont(size); }
+    public static Font uiBold(float size) {
+        return load("Nunito-Bold.ttf").deriveFont(size * scale);
+    }
+
     /** The open module in the sidebar (Nunito ExtraBold). */
-    public static Font uiExtraBold(float size) { return load("Nunito-ExtraBold.ttf").deriveFont(size); }
+    public static Font uiExtraBold(float size) {
+        return load("Nunito-ExtraBold.ttf").deriveFont(size * scale);
+    }
 }
