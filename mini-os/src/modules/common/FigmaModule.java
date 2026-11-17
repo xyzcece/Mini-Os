@@ -373,38 +373,67 @@ public abstract class FigmaModule extends ModulePanel {
     }
 
     /** Module title in Yellowtail with the green gradient fill and a soft drop shadow. */
+    /**
+     * Big script title with a dark outline, drop shadow and green gradient.
+     * Sized from the letters' real drawn shape (script fonts lean past their advance width), and when the
+     * header is narrower than the title (small window, Windows display scaling) it shrinks to fit instead
+     * of being cut off.
+     */
     public static class GradientTitle extends JComponent {
         private static final long serialVersionUID = 1L;
+        /** Room around the letters for the outline (4.5px) and the shadow (2px right, 3px down). */
+        private static final int PAD_L = 4, PAD_R = 10, PAD_V = 6;
         private final String s;
         public GradientTitle(String s) { this.s = s; setFont(Fonts.title(58f)); setAlignmentX(LEFT_ALIGNMENT); }
 
-        @Override public Dimension getPreferredSize() {
-            FontMetrics fm = getFontMetrics(getFont());
-            Insets in = getInsets();
-            // extra room for the outline and the drop shadow
-            return new Dimension(fm.stringWidth(s) + 18 + in.left + in.right, (int) Math.ceil(58 * 1.1) + 6 + in.top + in.bottom);
+        /**
+         * The drawn shape of the letters at full size, measured the same way paintComponent draws them
+         * (anti-aliased, with the screen's display scaling), so the size asked for matches what is painted.
+         */
+        private java.awt.geom.Rectangle2D inkBounds() {
+            GraphicsConfiguration gc = getGraphicsConfiguration();
+            AffineTransform screen = gc != null ? gc.getDefaultTransform() : new AffineTransform();
+            java.awt.font.FontRenderContext frc = new java.awt.font.FontRenderContext(screen,
+                    RenderingHints.VALUE_TEXT_ANTIALIAS_ON, RenderingHints.VALUE_FRACTIONALMETRICS_DEFAULT);
+            return new TextLayout(s, getFont(), frc).getOutline(null).getBounds2D();
         }
+
+        @Override public Dimension getPreferredSize() {
+            Insets in = getInsets();
+            java.awt.geom.Rectangle2D b = inkBounds();
+            int w = (int) Math.ceil(Math.max(b.getMaxX(), 0) - Math.min(b.getMinX(), 0)) + PAD_L + PAD_R;
+            return new Dimension(w + in.left + in.right, (int) Math.ceil(58 * 1.1) + PAD_V + in.top + in.bottom);
+        }
+        @Override public Dimension getMaximumSize() { return getPreferredSize(); }
+        /** Lets the header give it less room than it wants; paint then scales the title down. */
+        @Override public Dimension getMinimumSize() { return new Dimension(60, getPreferredSize().height); }
 
         /** Dark outline around the letters (drawn behind the fill, so it shows as an outer border). */
         static final Color OUTLINE = new Color(0x16210f);
         static final float OUTLINE_W = 4.5f;
-        @Override public Dimension getMaximumSize() { return getPreferredSize(); }
 
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
             Insets in = getInsets();
-            int boxH = getHeight() - in.top - in.bottom;
+            int boxW = getWidth() - in.left - in.right, boxH = getHeight() - in.top - in.bottom;
             TextLayout tl = new TextLayout(s, getFont(), g2.getFontRenderContext());
-            float baseline = in.top + (boxH - (tl.getAscent() + tl.getDescent())) / 2f + tl.getAscent();
-            Shape glyphs = tl.getOutline(AffineTransform.getTranslateInstance(in.left + 4, baseline));
-            BasicStroke outline = new BasicStroke(OUTLINE_W, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
-            Shape shadow = AffineTransform.getTranslateInstance(2, 3).createTransformedShape(glyphs);
+            java.awt.geom.Rectangle2D ink = tl.getOutline(null).getBounds2D();
+            double need = Math.max(ink.getMaxX(), 0) - Math.min(ink.getMinX(), 0) + PAD_L + PAD_R;
+            double scale = Math.min(1.0, boxW / need);     // shrink to fit, never grow
+            float baseline = (boxH - (tl.getAscent() + tl.getDescent()) * (float) scale) / 2f + tl.getAscent() * (float) scale;
+
+            AffineTransform at = AffineTransform.getTranslateInstance(in.left + PAD_L - Math.min(ink.getMinX(), 0) * scale, in.top + baseline);
+            at.scale(scale, scale);
+            Shape glyphs = at.createTransformedShape(tl.getOutline(null));
+            BasicStroke outline = new BasicStroke((float) (OUTLINE_W * scale), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+            Shape shadow = AffineTransform.getTranslateInstance(2 * scale, 3 * scale).createTransformedShape(glyphs);
             g2.setColor(new Color(20, 31, 15, 64));                          // soft drop shadow
             g2.fill(shadow);
             g2.setStroke(outline); g2.draw(shadow);
             g2.setColor(OUTLINE);                                            // black border lines
             g2.setStroke(outline); g2.draw(glyphs);
-            g2.setPaint(new LinearGradientPaint(0, in.top, 0, in.top + boxH, new float[]{0f, .38f, .62f, 1f},
+            java.awt.geom.Rectangle2D gb = glyphs.getBounds2D();
+            g2.setPaint(new LinearGradientPaint(0, (float) gb.getMinY(), 0, (float) gb.getMaxY(), new float[]{0f, .38f, .62f, 1f},
                     new Color[]{Color.WHITE, new Color(0xf7ffe5), new Color(0xb0f552), new Color(0x5ed112)}));
             g2.fill(glyphs);
             g2.dispose();
