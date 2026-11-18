@@ -36,12 +36,33 @@ public class ReplacementModule extends FigmaModule {
     private boolean hasRun = false;
     private final transient List<HistoryItem> history = new ArrayList<>();
     private final transient Deque<String[]> undoStack = new ArrayDeque<>();
+    private final transient Deque<String[]> redoStack = new ArrayDeque<>();
     private boolean restoring = false;
 
     private record HistoryItem(String label, String ref, String frames, String algo) {}
 
     @Override public String title()    { return "Page Replacement"; }
     @Override public String subtitle() { return "Visualize FIFO, LRU, and Optimal replacement."; }
+    @Override protected void onUndoPressed() {
+        if (undoStack.isEmpty()) { showToast(this, "Nothing to undo"); return; }
+        if (reference != null) redoStack.push(new String[]{reference.getText(), frames.getText()});
+        String[] prev = undoStack.pop();
+        setFields(prev[0], prev[1]);
+        hasRun = false;
+        markInputsDirty();
+        showToast(this, "Undid · Ctrl+Y to redo");
+    }
+
+    @Override protected void onRedoPressed() {
+        if (redoStack.isEmpty()) { showToast(this, "Nothing to redo"); return; }
+        if (reference != null) undoStack.push(new String[]{reference.getText(), frames.getText()});
+        String[] next = redoStack.pop();
+        setFields(next[0], next[1]);
+        hasRun = false;
+        markInputsDirty();
+        showToast(this, "Redid change");
+    }
+
     @Override protected String crumb() { return "REPLACEMENT"; }
     @Override protected String lead()  { return "Trace the page faults and hits for a reference string."; }
 
@@ -69,7 +90,7 @@ public class ReplacementModule extends FigmaModule {
             pushUndo();
             setFields(SAMPLE_REF, SAMPLE_FRAMES);
             hasRun = false;
-            rerun();
+            markInputsDirty();
             showToast(this, "Loaded sample — press RUN SIMULATION");
         });
 
@@ -78,7 +99,7 @@ public class ReplacementModule extends FigmaModule {
             pushUndo();
             setFields(LARGE_REF, LARGE_FRAMES);
             hasRun = false;
-            rerun();
+            markInputsDirty();
             showToast(this, "Loaded 25 pages — press RUN SIMULATION");
         });
 
@@ -93,25 +114,28 @@ public class ReplacementModule extends FigmaModule {
             }
             setFields(sb.toString(), frames.getText().trim().isEmpty() ? "3" : frames.getText());
             hasRun = false;
-            rerun();
+            markInputsDirty();
             showToast(this, "Generated 16 pages — press RUN SIMULATION");
+        });
+
+        DashedPill trimBtn = new DashedPill("−1");
+        trimBtn.setToolTipText("Remove the last page reference");
+        trimBtn.addActionListener(e -> {
+            String cur = reference.getText().trim();
+            if (cur.isEmpty()) return;
+            pushUndo();
+            String[] toks = cur.split("[\\s,;]+");
+            String next = toks.length <= 1 ? "" : String.join(" ", java.util.Arrays.copyOf(toks, toks.length - 1));
+            reference.setText(next);
+            markInputsDirty();
+            showToast(this, "Removed last reference · Ctrl+Z to undo");
         });
 
         DashedPill histBtn = new DashedPill("History");
         histBtn.addActionListener(e -> showHistoryMenu(histBtn));
 
         DashedPill undoBtn = new DashedPill("Undo");
-        undoBtn.addActionListener(e -> {
-            if (undoStack.isEmpty()) {
-                showToast(this, "Nothing to undo");
-                return;
-            }
-            String[] prev = undoStack.pop();
-            setFields(prev[0], prev[1]);
-            hasRun = false;
-            rerun();
-            showToast(this, "Undid last change");
-        });
+        undoBtn.addActionListener(e -> onUndoPressed());
 
         DashedPill clearBtn = new DashedPill("Clear");
         clearBtn.addActionListener(e -> {
@@ -119,7 +143,7 @@ public class ReplacementModule extends FigmaModule {
             setFields("", "");
             hasRun = false;
             rerun();
-            showToast(this, "Cleared inputs");
+            showToast(this, "Cleared · Ctrl+Z to undo");
         });
 
         JLabel countBadge = body(countPagesLabel(reference.getText()), 11, Theme.pink());
@@ -130,18 +154,6 @@ public class ReplacementModule extends FigmaModule {
             @Override public void changedUpdate(DocumentEvent e) { upd(); }
         });
 
-        tools.add(sampleBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(largeBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(randomBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(histBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(undoBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(clearBtn);
-        tools.add(Box.createHorizontalStrut(8));
         DashedPill badBtn = new DashedPill("Invalid input test");
         badBtn.addActionListener(e -> {
             pushUndo();
@@ -150,7 +162,22 @@ public class ReplacementModule extends FigmaModule {
             rerun();
             showToast(this, "Loaded bad input - the result card shows what to fix");
         });
+
+        tools.add(sampleBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(largeBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(randomBtn);
+        tools.add(Box.createHorizontalStrut(8));
         tools.add(badBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(histBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(undoBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(clearBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(trimBtn);
         tools.add(Box.createHorizontalStrut(12));
         tools.add(countBadge);
         p.add(tools, BorderLayout.SOUTH);
@@ -161,7 +188,8 @@ public class ReplacementModule extends FigmaModule {
         String[] cur = {reference.getText(), frames.getText()};
         if (!undoStack.isEmpty() && Arrays.equals(undoStack.peek(), cur)) return;
         undoStack.push(cur);
-        if (undoStack.size() > 15) undoStack.removeLast();
+        redoStack.clear();
+        if (undoStack.size() > 50) undoStack.removeLast();
     }
 
     private void setFields(String ref, String fr) {
@@ -238,9 +266,9 @@ public class ReplacementModule extends FigmaModule {
         // 1) Summary cards (#FAULT, #HIT, SUMMARY)
         Row cards = new Row(new GridLayout(1, 3, 12, 0));
         cards.add(new SummaryCard("#FAULT", String.valueOf(res.faults),
-                String.format("%.1f%% fault rate", 100.0 * res.faults / total), Theme.pink()));
+                String.format("%.3f%% fault rate", 100.0 * res.faults / total), Theme.pink()));
         cards.add(new SummaryCard("#HIT", String.valueOf(res.hits),
-                String.format("%.1f%% hit ratio", 100.0 * res.hits / total), Theme.green()));
+                String.format("%.3f%% hit ratio", 100.0 * res.hits / total), Theme.green()));
         cards.add(new SummaryCard("SUMMARY", numFrames + (numFrames == 1 ? " frame" : " frames"),
                 total + " references · " + algo, Theme.inputLine()));
         r.add(cards);
@@ -303,8 +331,8 @@ public class ReplacementModule extends FigmaModule {
                     ALGOS[i],
                     String.valueOf(x.faults),
                     String.valueOf(x.hits),
-                    String.format("%.1f%%", 100.0 * x.faults / total),
-                    String.format("%.1f%%", 100.0 * x.hits / total)
+                    String.format("%.3f%%", 100.0 * x.faults / total),
+                    String.format("%.3f%%", 100.0 * x.hits / total)
             };
         }
         r.add(collapsibleSection("COMPARE ALL ALGORITHMS", new CompareTable(cmp, current, faultsArr, minFaults)));
@@ -316,16 +344,6 @@ public class ReplacementModule extends FigmaModule {
                     String.format("%s had %d fewer page faults than %s (%d vs %d).",
                             bestAlgo, maxFaults - minFaults, worstAlgo, minFaults, maxFaults)));
         }
-
-        r.add(Box.createVerticalStrut(10));
-        final String copyStr = String.format("Page Replacement (%s, %d frames, %d refs)%n#FAULT: %d (%.1f%%) | #HIT: %d (%.1f%%)%n",
-                algo, numFrames, total, res.faults, 100.0 * res.faults / total, res.hits, 100.0 * res.hits / total);
-        DashedPill copyBtn = new DashedPill("Copy summary");
-        copyBtn.addActionListener(e -> {
-            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(copyStr), null);
-            showToast(this, "Copied summary to clipboard!");
-        });
-        r.add(copyBtn);
     }
 
     private void recordHistory(String label) {

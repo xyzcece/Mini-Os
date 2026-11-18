@@ -71,6 +71,9 @@ public class CpuModule extends FigmaModule {
 
     @Override public String title()    { return "CPU Scheduling"; }
     @Override public String subtitle() { return "Compare FIFO, SJF, SRT, Priority, and Round Robin (quantum = 10 min)."; }
+    @Override protected void onUndoPressed() { history.undo(this, snapshot(), this::restore); }
+    @Override protected void onRedoPressed() { history.redo(this, snapshot(), this::restore); }
+
     @Override protected String crumb() { return "CPU"; }
     @Override protected String lead()  { return "Pick a policy, then read the job table, averages and Gantt chart."; }
     @Override protected int inputsTop() { return 4; }
@@ -130,7 +133,7 @@ public class CpuModule extends FigmaModule {
                 pill("Invalid input test", () -> load(BAD_AT, BAD_RT, BAD_PRI, "0",
                         "Loaded bad input - the result card shows what to fix")),
                 hist,
-                pill("Undo", () -> history.undo(this, this::restore)),
+                pill("Undo", () -> onUndoPressed()),
                 pill("Clear", () -> {
                     String[] blank = new String[grid.size()];
                     Arrays.fill(blank, "");
@@ -150,7 +153,7 @@ public class CpuModule extends FigmaModule {
         quantumText = st.quantum();
         quantum = null;
         rebuildInputs();
-        rerun();
+        markInputsDirty();
     }
 
     private void load(String[] at, String[] rt, String[] pri, String q, String toast) {
@@ -185,8 +188,8 @@ public class CpuModule extends FigmaModule {
         history.push(snapshot());
         grid.setRows(pasted);
         rebuildInputs();
-        rerun();
-        showToast(this, "Imported " + pasted.size() + " jobs");
+        markInputsDirty();
+        showToast(this, "Imported " + pasted.size() + " jobs — press RUN SIMULATION");
     }
 
     /** "JOBS" box: boxes for up to 7 jobs, a scrolling table for 8+, and the +1 / +5 / −1 / Set / Paste row. */
@@ -203,7 +206,7 @@ public class CpuModule extends FigmaModule {
         s.setLayout(new BoxLayout(s, BoxLayout.Y_AXIS));
         s.add(fieldLabel("Algorithm"));
         s.add(Box.createVerticalStrut(6));
-        s.add(new Dropdown(algoChoice, ALGOS, pick -> { saveFields(); algoChoice = pick; rebuildInputs(); rerun(); }));
+        s.add(new Dropdown(algoChoice, ALGOS, pick -> { saveFields(); algoChoice = pick; rebuildInputs(); markInputsDirty(); }));
         if (algoChoice.equals("Round Robin")) {
             s.add(Box.createVerticalStrut(10));
             s.add(fieldLabel("Time quantum (min)"));
@@ -261,7 +264,7 @@ public class CpuModule extends FigmaModule {
         }
 
         Result res = schedule(algo, list, rr ? q : 1);
-        history.record(String.format("%s · %d jobs · AWT %.2f", rr ? "RR q=" + q : algo, list.size(), res.awt), snapshot());
+        history.record(String.format("%s · %d jobs · AWT %.3f", rr ? "RR q=" + q : algo, list.size(), res.awt), snapshot());
 
         // 1) heading + job table
         r.add(heading(rr ? "ROUND ROBIN · Q=" + q : algo.toUpperCase(),
@@ -282,9 +285,9 @@ public class CpuModule extends FigmaModule {
 
         // 2) averages
         JPanel avg = hRow();
-        avg.add(body(String.format("AWT = %.2f", res.awt), 16, Theme.pink()));
+        avg.add(body(String.format("AWT = %.3f", res.awt), 16, Theme.pink()));
         avg.add(Box.createHorizontalStrut(28));
-        avg.add(body(String.format("ATAT = %.2f", res.atat), 16, Theme.dark ? Theme.cyan() : Theme.text()));
+        avg.add(body(String.format("ATAT = %.3f", res.atat), 16, Theme.dark ? Theme.cyan() : Theme.text()));
         avg.add(Box.createHorizontalStrut(28));
         avg.add(body("WT = TAT − RT  ·  TAT = CT − AT", 12, Theme.muted()));
         r.add(pad(avg, 0, 0, false));
@@ -317,7 +320,7 @@ public class CpuModule extends FigmaModule {
             }
             Result x = schedule(ALGOS[i], list, q == null ? 1 : q);
             cmp[i] = new String[]{ALGOS[i].equals("Round Robin") ? "Round Robin (q=" + q + ")" : ALGOS[i],
-                    String.format("%.2f", x.awt), String.format("%.2f", x.atat)};
+                    String.format("%.3f", x.awt), String.format("%.3f", x.atat)};
         }
         r.add(new DataTable(new String[]{"Algorithm", "AWT", "ATAT"}, cmp, current));
 

@@ -90,7 +90,6 @@ public class Main {
         splash.setContentPane(card);
         splash.pack();
         splash.setLocationRelativeTo(null);
-        splash.setAlwaysOnTop(true);
         splash.setVisible(true);
 
         new Timer(22, e -> {
@@ -101,22 +100,12 @@ public class Main {
                 card.repaint();
                 MiniOS os = new MiniOS();
                 os.setBackground(Theme.bg());
+                os.getContentPane().setBackground(Theme.bg());
                 os.setExtendedState(os.getExtendedState() | JFrame.MAXIMIZED_BOTH);
+                splash.dispose();
                 os.setVisible(true);
                 os.toFront();
                 os.requestFocus();
-                // Dispose splash after the maximized frame has rendered its first paint
-                Timer closeSplash = new Timer(80, ev -> {
-                    ((Timer) ev.getSource()).stop();
-                    splash.setAlwaysOnTop(false);
-                    splash.dispose();
-                    os.setAlwaysOnTop(true);
-                    os.toFront();
-                    os.requestFocus();
-                    os.setAlwaysOnTop(false);
-                });
-                closeSplash.setRepeats(false);
-                closeSplash.start();
             } else {
                 card.repaint();
             }

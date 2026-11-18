@@ -51,6 +51,9 @@ public class SegmentationModule extends FigmaModule {
 
     @Override public String title()    { return "Segmentation"; }
     @Override public String subtitle() { return "Validate offsets against base and limit pairs."; }
+    @Override protected void onUndoPressed() { history.undo(this, snapshot(), this::restore); }
+    @Override protected void onRedoPressed() { history.redo(this, snapshot(), this::restore); }
+
     @Override protected String crumb() { return "SEGMENTS"; }
     @Override protected String lead()  { return "Validate a segment:offset pair and find its physical address."; }
 
@@ -101,8 +104,8 @@ public class SegmentationModule extends FigmaModule {
         history.push(snapshot());
         grid.setRows(pasted);
         rebuildInputs();
-        rerun();
-        showToast(this, "Imported " + pasted.size() + " segments");
+        markInputsDirty();
+        showToast(this, "Imported " + pasted.size() + " segments — press RUN SIMULATION");
     }
 
     /** Sample / Out-of-range / Large / Random / Invalid input / History / Undo / Clear pills. */
@@ -119,7 +122,7 @@ public class SegmentationModule extends FigmaModule {
                 pill("Invalid input test", () -> load(rows(BAD), "x", "-1",
                         "Loaded bad input - the red cells show what to fix")),
                 hist,
-                pill("Undo", () -> history.undo(this, this::restore)),
+                pill("Undo", () -> onUndoPressed()),
                 pill("Clear", () -> load(blank(grid.size()), "", "", "Cleared all fields")));
     }
 
@@ -156,7 +159,7 @@ public class SegmentationModule extends FigmaModule {
         offsetText = st.offset();
         segField = offsetField = null;
         rebuildInputs();
-        rerun();
+        markInputsDirty();
     }
 
     private void load(List<String[]> table, String seg, String offset, String toast) {

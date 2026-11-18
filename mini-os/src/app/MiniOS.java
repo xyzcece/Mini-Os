@@ -54,7 +54,26 @@ public class MiniOS extends JFrame {
 
     public MiniOS() {
         super("Mini OS – OS Lab");
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override public void windowClosing(java.awt.event.WindowEvent e) {
+                boolean hasInputs = false;
+                for (ModulePanel m : MODULES) {
+                    if (m instanceof modules.common.FigmaModule fm && fm.hasAnyInput()) {
+                        hasInputs = true;
+                        break;
+                    }
+                }
+                if (hasInputs) {
+                    int ans = JOptionPane.showConfirmDialog(MiniOS.this,
+                            "You have entered inputs in one or more modules.\nAre you sure you want to exit Mini OS?",
+                            "Confirm Exit", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                    if (ans != JOptionPane.YES_OPTION) return;
+                }
+                dispose();
+                System.exit(0);
+            }
+        });
         setSize(1280, 860);
         setLocationRelativeTo(null);
         setBackground(Theme.bg());
@@ -137,11 +156,15 @@ public class MiniOS extends JFrame {
 
         buildWindow();
         Theme.onChange(() -> {
+            int savedScroll = scrollPanes[active] != null ? scrollPanes[active].getVerticalScrollBar().getValue() : 0;
             setBackground(Theme.bg());
             desktop.setBackground(Theme.bg());
             buildWindow();
             if (taskbarPanel != null) taskbarPanel.repaint();
             desktop.repaint();
+            SwingUtilities.invokeLater(() -> {
+                if (scrollPanes[active] != null) scrollPanes[active].getVerticalScrollBar().setValue(savedScroll);
+            });
         });
         window.setVisible(false);
         taskButton.setVisible(false);
@@ -505,9 +528,13 @@ public class MiniOS extends JFrame {
     private void setZoom(float target) {
         float next = Math.max(0.85f, Math.min(1.30f, Math.round(target * 100f) / 100f));
         if (Math.abs(next - Fonts.scale) < 0.01f) return;
+        int savedScroll = scrollPanes[active] != null ? scrollPanes[active].getVerticalScrollBar().getValue() : 0;
         Fonts.scale = next;
         for (ModulePanel m : MODULES) m.rebuild();
         buildWindow();
+        SwingUtilities.invokeLater(() -> {
+            if (scrollPanes[active] != null) scrollPanes[active].getVerticalScrollBar().setValue(savedScroll);
+        });
         modules.common.FigmaModule.showToast(window.isVisible() ? window : desktop,
                 String.format("Zoom: %d%%", Math.round(Fonts.scale * 100)));
     }
@@ -596,7 +623,6 @@ public class MiniOS extends JFrame {
         boolean wasHidden = !window.isVisible();
         active = i;
         cards.show(content, String.valueOf(i));
-        if (scrollPanes[i] != null) scrollPanes[i].getVerticalScrollBar().setValue(0);
         window.setVisible(true);
         taskButton.setVisible(true);
         taskButton.setText(MODULES[i].title());
