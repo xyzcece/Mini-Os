@@ -61,6 +61,7 @@ public class FragmentationModule extends FigmaModule {
     private boolean hasRun = false;
 
     private final transient Deque<String[]> undoStack = new ArrayDeque<>();
+    private final transient Deque<String[]> redoStack = new ArrayDeque<>();
     private final transient List<HistoryItem> history = new ArrayList<>();
     private boolean restoring = false;
 
@@ -68,6 +69,26 @@ public class FragmentationModule extends FigmaModule {
 
     @Override public String title()    { return "Fragmentation"; }
     @Override public String subtitle() { return "Explore first, next, best, and worst fit allocation."; }
+    @Override protected void onUndoPressed() {
+        if (undoStack.isEmpty()) { showToast(this, "Nothing to undo"); return; }
+        if (blocks != null) redoStack.push(new String[]{blocks.getText(), processes.getText()});
+        String[] prev = undoStack.pop();
+        setFields(prev[0], prev[1]);
+        hasRun = false;
+        markInputsDirty();
+        showToast(this, "Undid · Ctrl+Y to redo");
+    }
+
+    @Override protected void onRedoPressed() {
+        if (redoStack.isEmpty()) { showToast(this, "Nothing to redo"); return; }
+        if (blocks != null) undoStack.push(new String[]{blocks.getText(), processes.getText()});
+        String[] next = redoStack.pop();
+        setFields(next[0], next[1]);
+        hasRun = false;
+        markInputsDirty();
+        showToast(this, "Redid change");
+    }
+
     @Override protected String crumb() { return "FRAGMENTATION"; }
     @Override protected String lead()  { return "Place each process in a memory block and see how much space is left."; }
 
@@ -142,7 +163,7 @@ public class FragmentationModule extends FigmaModule {
             setFields("", "");
             hasRun = false;
             rerun();
-            showToast(this, "Cleared inputs");
+            showToast(this, "Cleared · Ctrl+Z to undo");
         });
 
         JLabel badge = body(countLabel(), 11, Theme.pink());
@@ -155,8 +176,6 @@ public class FragmentationModule extends FigmaModule {
         blocks.getDocument().addDocumentListener(watch);
         processes.getDocument().addDocumentListener(watch);
 
-        tools.add(sample); tools.add(large); tools.add(random);
-        tools.add(hist); tools.add(undo); tools.add(clear);
         DashedPill bad = new DashedPill("Invalid input test");
         bad.addActionListener(e -> {
             pushUndo();
@@ -165,7 +184,8 @@ public class FragmentationModule extends FigmaModule {
             rerun();
             showToast(this, "Loaded bad input - the result card shows what to fix");
         });
-        tools.add(bad);
+        tools.add(sample); tools.add(large); tools.add(random); tools.add(bad);
+        tools.add(hist); tools.add(undo); tools.add(clear);
         tools.add(Box.createHorizontalStrut(6));
         tools.add(badge);
         p.add(tools, BorderLayout.SOUTH);
@@ -275,7 +295,8 @@ public class FragmentationModule extends FigmaModule {
         String[] cur = {blocks.getText(), processes.getText()};
         if (!undoStack.isEmpty() && Arrays.equals(undoStack.peek(), cur)) return;
         undoStack.push(cur);
-        if (undoStack.size() > 15) undoStack.removeLast();
+        redoStack.clear();
+        if (undoStack.size() > 50) undoStack.removeLast();
     }
 
     private void recordHistory(String label) {
@@ -552,21 +573,21 @@ public class FragmentationModule extends FigmaModule {
             throw new IllegalArgumentException("type at least one " + what + " size.");
         String[] parts = trimmed.split("[\\s,]+");
         List<Integer> out = new ArrayList<>();
+        int pos = 0;
         for (String p : parts) {
             if (p.isEmpty()) continue;
+            pos++;
             long v;
             try {
                 v = Long.parseLong(p);
             } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("every " + what + " size must be a whole number - \""
-                        + p + "\" is not.");
+                throw new IllegalArgumentException(what + " #" + pos + " (\"" + p + "\") is not a whole number.");
             }
             if (v <= 0)
-                throw new IllegalArgumentException("every " + what + " size must be more than 0 - \""
-                        + p + "\" is not.");
+                throw new IllegalArgumentException(what + " #" + pos + " (\"" + p + "\") must be more than 0.");
             if (v > MAX_SIZE)
                 throw new IllegalArgumentException(String.format(
-                        "\"%s\" is too big - keep each %s size at %,d KB or less.", p, what, MAX_SIZE));
+                        "%s #%d (\"%s\") is too big - keep each %s size at %,d KB or less.", what, pos, p, what, MAX_SIZE));
             out.add((int) v);
         }
         if (out.isEmpty())

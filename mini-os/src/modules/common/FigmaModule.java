@@ -57,16 +57,22 @@ public abstract class FigmaModule extends ModulePanel {
         inputs.removeAll(); inputs.setOpaque(false); inputs.setLayout(new BorderLayout());
         buildInputs(inputs);
         add(pad(inputs, inputsTop(), 0, true));
+        watchInputs(inputs);
 
         RunButton run = new RunButton();
         run.addActionListener(e -> onRunPressed());
-        add(pad(run, 15, 24, false));
+        add(pad(run, 15, 16, false));
+
+        staleBanner = new Notice(Theme.orange(), "INPUTS CHANGED", "Press RUN SIMULATION (Ctrl+Enter) to update the output below.");
+        staleBanner.setVisible(false);
+        add(pad(staleBanner, 0, 10, true));
 
         results.removeAll(); results.setOpaque(false);
         results.setLayout(new BoxLayout(results, BoxLayout.Y_AXIS));
         results.setBorder(new EmptyBorder(14, 16, 14, 16));
         resultsCard = new Card(results);
         add(resultsCard);
+        resultsStale = false;
         runSimulation(results);
 
         PixelButton saveBtn = new PixelButton("SAVE PNG", false);
@@ -88,12 +94,31 @@ public abstract class FigmaModule extends ModulePanel {
         topRow.add(topBtn);
         add(topRow);
 
-        // Ctrl+Enter runs simulation from anywhere in the module
+        // Ctrl+Enter runs simulation, Ctrl+Z triggers undo from anywhere in the module
         getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(
                 KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER, java.awt.event.InputEvent.CTRL_DOWN_MASK), "runSim");
         getActionMap().put("runSim", new AbstractAction() {
             private static final long serialVersionUID = 1L;
             @Override public void actionPerformed(java.awt.event.ActionEvent e) { onRunPressed(); }
+        });
+        getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(
+                KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Z, java.awt.event.InputEvent.CTRL_DOWN_MASK), "undoMod");
+        getActionMap().put("undoMod", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { onUndoPressed(); }
+        });
+        getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(
+                KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Y, java.awt.event.InputEvent.CTRL_DOWN_MASK), "redoMod");
+        getActionMap().put("redoMod", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { onRedoPressed(); }
+        });
+
+        addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override public void componentResized(java.awt.event.ComponentEvent e) {
+                revalidate();
+                repaint();
+            }
         });
 
         revalidate(); repaint();
@@ -101,6 +126,8 @@ public abstract class FigmaModule extends ModulePanel {
 
     private Sticker headerSticker;
     private Card resultsCard;
+    private Notice staleBanner;
+    private boolean resultsStale = false;
 
     /** Bounces the header heron sticker (called on simulation run or module switch). */
     public void bounceSticker() {
@@ -108,12 +135,87 @@ public abstract class FigmaModule extends ModulePanel {
     }
 
     /** Called when RUN SIMULATION (or Ctrl+Enter) is pressed. */
-    protected void onRunPressed() { rerun(); }
+    protected void onRunPressed() {
+        rerun();
+        scrollToResults();
+    }
+
+    /** Called when Ctrl+Z is pressed inside a module; override to trigger module Undo. */
+    protected void onUndoPressed() {}
+
+    /** Called when Ctrl+Y is pressed inside a module; override to trigger module Redo. */
+    protected void onRedoPressed() {}
 
     /** Runs the simulation again into the result card. */
     protected void rerun() {
         if (headerSticker != null) headerSticker.bounce();
+        resultsStale = false;
+        if (staleBanner != null) staleBanner.setVisible(false);
+        if (resultsCard != null) resultsCard.setDimmed(false);
         results.removeAll(); runSimulation(results); results.revalidate(); results.repaint();
+    }
+
+    /** Marks the current result card as stale when inputs are edited before re-running. */
+    protected void markInputsDirty() {
+        if (!resultsStale && staleBanner != null && results.getComponentCount() > 0) {
+            resultsStale = true;
+            staleBanner.setVisible(true);
+            if (resultsCard != null) { resultsCard.setDimmed(true); resultsCard.repaint(); }
+            revalidate();
+        }
+    }
+
+    /** Scrolls the module viewport down to show results/errors after RUN SIMULATION. */
+    private void scrollToResults() {
+        SwingUtilities.invokeLater(() -> {
+            if (resultsCard == null) return;
+            JScrollPane sp = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, this);
+            if (sp == null) return;
+            JScrollBar vsb = sp.getVerticalScrollBar();
+            int viewH = sp.getViewport().getHeight();
+            int targetY = Math.max(0, resultsCard.getY() - 24);
+            if (resultsCard.getY() > vsb.getValue() + (int) (viewH * 0.45)) {
+                vsb.setValue(Math.min(targetY, Math.max(0, vsb.getMaximum() - viewH)));
+            }
+        });
+    }
+
+    /** Attaches change listeners to text fields & tables inside inputs so edits mark outputs stale. */
+    private void watchInputs(Container c) {
+        for (Component k : c.getComponents()) {
+            if (k instanceof JTextField tf) {
+                tf.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                    @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { markInputsDirty(); }
+                    @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { markInputsDirty(); }
+                    @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { markInputsDirty(); }
+                });
+            } else if (k instanceof JTable tb) {
+                tb.getModel().addTableModelListener(e -> markInputsDirty());
+            } else if (k instanceof Container sub) {
+                watchInputs(sub);
+            }
+        }
+    }
+
+    /** True if any input field or table cell in this module contains non-blank user text. */
+    public boolean hasAnyInput() {
+        return hasNonBlankInput(inputs);
+    }
+
+    private static boolean hasNonBlankInput(Container c) {
+        for (Component k : c.getComponents()) {
+            if (k instanceof JTextField tf && !tf.getText().trim().isEmpty()) return true;
+            if (k instanceof JTable tb) {
+                for (int r = 0; r < tb.getRowCount(); r++) {
+                    for (int col = 1; col < tb.getColumnCount() - 1; col++) {
+                        Object v = tb.getValueAt(r, col);
+                        if (v != null && !v.toString().trim().isEmpty()) return true;
+                    }
+                }
+            }
+            if (k instanceof Container sub && hasNonBlankInput(sub)) return true;
+        }
+        return false;
     }
 
     /** Smoothly animates the enclosing JScrollPane back to the top. */
@@ -197,7 +299,7 @@ public abstract class FigmaModule extends ModulePanel {
 
     /** Rebuilds only the input area (e.g. after adding a job) and keeps the rest of the page. */
     protected void rebuildInputs() {
-        inputs.removeAll(); buildInputs(inputs); inputs.revalidate(); inputs.repaint();
+        inputs.removeAll(); buildInputs(inputs); watchInputs(inputs); inputs.revalidate(); inputs.repaint();
         revalidate(); repaint();
     }
 
@@ -508,6 +610,11 @@ public abstract class FigmaModule extends ModulePanel {
             setForeground(Theme.text()); setCaretColor(Theme.text());
             setBorder(new EmptyBorder(0, fixed ? 3 : 11, 2, fixed ? 3 : 11));
             setAlignmentX(LEFT_ALIGNMENT);
+            getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { setInvalid(false); }
+                @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { setInvalid(false); }
+                @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { setInvalid(false); }
+            });
         }
         @Override public Dimension getPreferredSize() { return new Dimension(prefW, prefH); }
         @Override public Dimension getMinimumSize()   { return new Dimension(fixed ? prefW : 30, prefH); }
@@ -757,10 +864,19 @@ public abstract class FigmaModule extends ModulePanel {
     /** Result card: lilac panel, rounded 14, soft pink shadow. */
     public static class Card extends Row {
         private static final long serialVersionUID = 1L;
+        private boolean dimmed = false;
         public Card(JComponent content) {
             super(new BorderLayout());
             setBorder(new EmptyBorder(0, 0, 8, 0));     // room for the shadow
             add(content);
+        }
+        public void setDimmed(boolean d) { this.dimmed = d; repaint(); }
+        @Override public void paint(Graphics g) {
+            if (!dimmed) { super.paint(g); return; }
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.72f));
+            super.paint(g2);
+            g2.dispose();
         }
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
@@ -1059,9 +1175,13 @@ public abstract class FigmaModule extends ModulePanel {
         private Dimension size(Container target, boolean preferred) {
             synchronized (target.getTreeLock()) {
                 int maxW = target.getWidth();
+                if (maxW <= 0) {
+                    Container vp = SwingUtilities.getAncestorOfClass(JViewport.class, target);
+                    if (vp != null && vp.getWidth() > 60) maxW = vp.getWidth() - 60;
+                }
                 Container c = target;
-                while (maxW == 0 && c.getParent() != null) { c = c.getParent(); maxW = c.getWidth(); }
-                if (maxW == 0) maxW = Integer.MAX_VALUE;
+                while (maxW <= 0 && c.getParent() != null) { c = c.getParent(); maxW = c.getWidth(); }
+                if (maxW <= 0) maxW = Integer.MAX_VALUE;
                 Insets in = target.getInsets();
                 maxW -= in.left + in.right + getHgap() * 2;
                 int w = 0, h = 0, rowW = 0, rowH = 0;
@@ -1086,12 +1206,14 @@ public abstract class FigmaModule extends ModulePanel {
      */
     public static class InputHistory<S> {
         private final java.util.Deque<S> undo = new java.util.ArrayDeque<>();
+        private final java.util.Deque<S> redo = new java.util.ArrayDeque<>();
         private final java.util.List<java.util.Map.Entry<String, S>> runs = new java.util.ArrayList<>();
 
         /** Call before changing the inputs, with a snapshot of how they are now. */
         public void push(S before) {
             undo.push(before);
-            if (undo.size() > 15) undo.removeLast();
+            redo.clear();
+            if (undo.size() > 50) undo.removeLast();
         }
 
         /** Restores the last snapshot (or shows "Nothing to undo"). */
@@ -1099,6 +1221,22 @@ public abstract class FigmaModule extends ModulePanel {
             if (undo.isEmpty()) { showToast(anchor, "Nothing to undo"); return; }
             restore.accept(undo.pop());
             showToast(anchor, "Undid last change");
+        }
+
+        /** Restores the last snapshot and pushes current onto the redo stack. */
+        public void undo(Component anchor, S current, java.util.function.Consumer<S> restore) {
+            if (undo.isEmpty()) { showToast(anchor, "Nothing to undo"); return; }
+            if (current != null) redo.push(current);
+            restore.accept(undo.pop());
+            showToast(anchor, "Undid · Ctrl+Y to redo");
+        }
+
+        /** Re-applies the last undone snapshot (or shows "Nothing to redo"). */
+        public void redo(Component anchor, S current, java.util.function.Consumer<S> restore) {
+            if (redo.isEmpty()) { showToast(anchor, "Nothing to redo"); return; }
+            if (current != null) undo.push(current);
+            restore.accept(redo.pop());
+            showToast(anchor, "Redid change");
         }
 
         /** Remembers a successful run; the same label is only kept once. */

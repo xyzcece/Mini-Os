@@ -45,12 +45,39 @@ public class MultiprogrammingModule extends FigmaModule {
     private boolean hasRun = false;
     private final transient List<HistoryItem> history = new ArrayList<>();
     private final transient Deque<UndoState> undoStack = new ArrayDeque<>();
+    private final transient Deque<UndoState> redoStack = new ArrayDeque<>();
 
     private record HistoryItem(String label, List<String[]> rows, String ioWait, String start) {}
     private record UndoState(List<String[]> rows, String ioWait, String start) {}
 
     @Override public String title()    { return "Multiprogramming"; }
     @Override public String subtitle() { return "Share the CPU between jobs and track the time each job has left."; }
+    @Override protected void onUndoPressed() {
+        if (undoStack.isEmpty()) { showToast(this, "Nothing to undo"); return; }
+        saveFields();
+        List<String[]> cur = new ArrayList<>();
+        for (String[] j : jobs) cur.add(new String[]{j[0], j[1]});
+        redoStack.push(new UndoState(cur, ioWaitText, startText));
+        UndoState prev = undoStack.pop();
+        String[][] arr = prev.rows().toArray(new String[0][]);
+        hasRun = false;
+        loadPreset(arr, prev.ioWait(), prev.start());
+        showToast(this, "Undid · Ctrl+Y to redo");
+    }
+
+    @Override protected void onRedoPressed() {
+        if (redoStack.isEmpty()) { showToast(this, "Nothing to redo"); return; }
+        saveFields();
+        List<String[]> cur = new ArrayList<>();
+        for (String[] j : jobs) cur.add(new String[]{j[0], j[1]});
+        undoStack.push(new UndoState(cur, ioWaitText, startText));
+        UndoState next = redoStack.pop();
+        String[][] arr = next.rows().toArray(new String[0][]);
+        hasRun = false;
+        loadPreset(arr, next.ioWait(), next.start());
+        showToast(this, "Redid change");
+    }
+
     @Override protected String crumb() { return "MULTIPROGRAMMING"; }
     @Override protected String lead()  { return "Enter each job's arrival time (AT) and burst time (BT), then press RUN SIMULATION."; }
     @Override protected int inputsTop() { return 4; }
@@ -70,16 +97,17 @@ public class MultiprogrammingModule extends FigmaModule {
         JPanel grid = new JPanel(null) {
             private static final long serialVersionUID = 1L;
             private boolean assumedSide = true;
-            private boolean side() { return getWidth() == 0 || getWidth() >= jobBox.getPreferredSize().width + 16 + 200; }
+            private boolean side() { return getWidth() == 0 || getWidth() >= 700; }
             @Override public void doLayout() {
                 Dimension j = jobBox.getPreferredSize(), s = settings.getPreferredSize();
                 boolean side = side();
                 if (side) {
-                    int jbW = Math.min(j.width, Math.max(280, getWidth() - 16 - 200));
+                    int setW = Math.min(340, Math.max(250, (int) Math.round(getWidth() * 0.28)));
+                    int jbW = Math.max(360, getWidth() - setW - 18);
                     jobBox.setBounds(0, 0, jbW, j.height);
-                    settings.setBounds(jbW + 16, 0, getWidth() - jbW - 16, s.height);
+                    settings.setBounds(jbW + 18, 0, getWidth() - jbW - 18, s.height);
                 } else {
-                    jobBox.setBounds(0, 0, Math.min(j.width, getWidth()), j.height);
+                    jobBox.setBounds(0, 0, getWidth(), j.height);
                     settings.setBounds(0, j.height + 14, getWidth(), s.height);
                 }
                 if (side != assumedSide) SwingUtilities.invokeLater(this::revalidate);
@@ -104,13 +132,13 @@ public class MultiprogrammingModule extends FigmaModule {
         tools.setLayout(new WrapLayout(FlowLayout.LEFT, 0, 6));   // wraps onto a 2nd line when narrow
         tools.setBorder(new EmptyBorder(10, 0, 0, 0));
 
-        DashedPill teacherBtn = new DashedPill("Sample (Teacher 7.4–9.1)");
+        DashedPill teacherBtn = new DashedPill("Small sample (5)");
         teacherBtn.addActionListener(e -> {
             pushUndo();
             hasRun = false;
             loadPreset(new String[][]{{"7.4", "0.4"}, {"7.9", "0.6"}, {"8.1", "0.3"}, {"8.3", "0.2"}, {"8.4", "0.1"}},
                     "0", "7.4");
-            showToast(this, "Loaded Teacher example — press RUN SIMULATION");
+            showToast(this, "Loaded 5-job sample — press RUN SIMULATION");
         });
 
         DashedPill io80Btn = new DashedPill("Sample (80% I/O)");
@@ -138,24 +166,14 @@ public class MultiprogrammingModule extends FigmaModule {
         histBtn.addActionListener(e -> showHistoryMenu(histBtn));
 
         DashedPill undoBtn = new DashedPill("Undo");
-        undoBtn.addActionListener(e -> {
-            if (undoStack.isEmpty()) {
-                showToast(this, "Nothing to undo");
-                return;
-            }
-            UndoState prev = undoStack.pop();
-            String[][] arr = prev.rows().toArray(new String[0][]);
-            hasRun = false;
-            loadPreset(arr, prev.ioWait(), prev.start());
-            showToast(this, "Undid last change");
-        });
+        undoBtn.addActionListener(e -> onUndoPressed());
 
         DashedPill clearBtn = new DashedPill("Clear");
         clearBtn.addActionListener(e -> {
             pushUndo();
             hasRun = false;
             loadPreset(new String[][]{{"", ""}, {"", ""}, {"", ""}, {"", ""}, {"", ""}}, "", "");
-            showToast(this, "Cleared inputs");
+            showToast(this, "Cleared · Ctrl+Z to undo");
         });
 
         tools.add(teacherBtn);
@@ -186,7 +204,8 @@ public class MultiprogrammingModule extends FigmaModule {
         List<String[]> copy = new ArrayList<>();
         for (String[] j : jobs) copy.add(new String[]{j[0], j[1]});
         undoStack.push(new UndoState(copy, ioWaitText, startText));
-        if (undoStack.size() > 15) undoStack.removeLast();
+        redoStack.clear();
+        if (undoStack.size() > 50) undoStack.removeLast();
     }
 
     private void loadPreset(String[][] data, String io, String st) {
@@ -200,7 +219,7 @@ public class MultiprogrammingModule extends FigmaModule {
         ioWait = null;
         start = null;
         rebuildInputs();
-        rerun();
+        markInputsDirty();
     }
 
     /** "JOBS" box: horizontal boxes for 1-7 jobs, compact scrollable JTable for 8+ jobs. */
@@ -215,103 +234,219 @@ public class MultiprogrammingModule extends FigmaModule {
         b.add(head);
         b.add(Box.createVerticalStrut(6));
 
-        if (jobs.size() <= 7) {
-            JPanel ids = hRow(), at = hRow(), bt = hRow();
-            ids.add(cell("J#", 36, 22, Theme.muted()));
-            at.add(cell("AT", 36, 30, Theme.muted()));
-            bt.add(cell("BT", 36, 30, Theme.muted()));
-
-            for (int i = 0; i < jobs.size(); i++) {
-                final int idx = i;
-                RoundField a = new RoundField(jobs.get(i)[0], 6, 56, 30);
-                RoundField r = new RoundField(jobs.get(i)[1], 6, 56, 30);
-                // Enter runs simulation; Up/Down moves between AT and BT
-                a.addActionListener(e -> onRunPressed());
-                r.addActionListener(e -> onRunPressed());
-                a.addKeyListener(new KeyAdapter() {
-                    @Override public void keyPressed(KeyEvent e) {
-                        if (e.getKeyCode() == KeyEvent.VK_DOWN && idx < jobFields.size()) {
-                            jobFields.get(idx)[1].requestFocusInWindow();
-                        }
-                    }
-                });
-                r.addKeyListener(new KeyAdapter() {
-                    @Override public void keyPressed(KeyEvent e) {
-                        if (e.getKeyCode() == KeyEvent.VK_UP && idx < jobFields.size()) {
-                            jobFields.get(idx)[0].requestFocusInWindow();
-                        }
-                    }
-                });
-                jobFields.add(new RoundField[]{a, r});
-                ids.add(Box.createHorizontalStrut(6)); ids.add(cell("J" + (i + 1), 56, 22, Theme.text()));
-                at.add(Box.createHorizontalStrut(6));  at.add(a);
-                bt.add(Box.createHorizontalStrut(6));  bt.add(r);
-            }
-            b.add(ids); b.add(Box.createVerticalStrut(6));
-            b.add(at);  b.add(Box.createVerticalStrut(6));
-            b.add(bt);
-        } else {
-            // Vertical JTable for 8+ jobs: virtualized, fixed-height scroll, fast Excel-like entry
-            jobTableModel = new DefaultTableModel(new String[]{"J#", "AT", "BT"}, 0) {
-                private static final long serialVersionUID = 1L;
-                @Override public boolean isCellEditable(int row, int col) { return col > 0; }
-            };
-            for (int i = 0; i < jobs.size(); i++) {
-                jobTableModel.addRow(new Object[]{"J" + (i + 1), jobs.get(i)[0], jobs.get(i)[1]});
-            }
-            jobTable = new JTable(jobTableModel);
-            jobTable.setFont(Fonts.body(14f));
-            jobTable.setRowHeight(28);
-            jobTable.setForeground(Theme.text());
-            jobTable.setBackground(Theme.input());
-            jobTable.setGridColor(Theme.line());
-            jobTable.setShowGrid(true);
-            jobTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
-            DefaultTableCellRenderer center = new DefaultTableCellRenderer() {
-                private static final long serialVersionUID = 1L;
-                @Override public Component getTableCellRendererComponent(JTable tb, Object v, boolean s, boolean f, int r, int c) {
-                    Component comp = super.getTableCellRendererComponent(tb, v, s, f, r, c);
-                    if (!s) comp.setBackground(r % 2 == 0 ? Theme.panel() : Theme.panel2());
-                    comp.setForeground(c == 0 ? Theme.muted() : Theme.text());
-                    return comp;
-                }
-            };
-            center.setHorizontalAlignment(SwingConstants.CENTER);
-            jobTable.setDefaultRenderer(Object.class, center);
-            JTableHeader th = jobTable.getTableHeader();
-            th.setFont(Fonts.label(9f));
-            th.setBackground(Theme.panel2());
-            th.setForeground(Theme.muted());
-            jobTable.getColumnModel().getColumn(0).setPreferredWidth(64);
-            jobTable.getColumnModel().getColumn(1).setPreferredWidth(180);
-            jobTable.getColumnModel().getColumn(2).setPreferredWidth(180);
-
-            JScrollPane sp = new JScrollPane(jobTable);
-            sp.setAlignmentX(LEFT_ALIGNMENT);
-            sp.setBorder(BorderFactory.createLineBorder(Theme.inputLine(), 1));
-            sp.setPreferredSize(new Dimension(460, 210));
-            sp.setMaximumSize(new Dimension(560, 210));
-            styleScrollPane(sp);
-            b.add(sp);
+        boolean showDel = jobs.size() > 1;
+        String[] cols = showDel ? new String[]{"J#", "AT", "BT", ""} : new String[]{"J#", "AT", "BT"};
+        jobTableModel = new DefaultTableModel(cols, 0) {
+            private static final long serialVersionUID = 1L;
+            @Override public boolean isCellEditable(int row, int col) { return col == 1 || col == 2; }
+        };
+        for (int i = 0; i < jobs.size(); i++) {
+            if (showDel) jobTableModel.addRow(new Object[]{"J" + (i + 1), jobs.get(i)[0], jobs.get(i)[1], "×"});
+            else jobTableModel.addRow(new Object[]{"J" + (i + 1), jobs.get(i)[0], jobs.get(i)[1]});
         }
+        jobTable = new JTable(jobTableModel) {
+            private static final long serialVersionUID = 1L;
+            @Override public void changeSelection(int row, int col, boolean toggle, boolean extend) {
+                if (showDel && col == 3 && !toggle && !extend && getSelectedRowCount() > 1 && isRowSelected(row)) {
+                    return;
+                }
+                super.changeSelection(row, col, toggle, extend);
+            }
+        };
+        jobTable.setFont(Fonts.body(14f));
+        jobTable.setRowHeight(34);
+        jobTable.setRowMargin(2);
+        jobTable.setIntercellSpacing(new Dimension(6, 2));
+        jobTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+        jobTable.setForeground(Theme.text());
+        jobTable.setBackground(Theme.input());
+        jobTable.setGridColor(Theme.line());
+        jobTable.setShowGrid(true);
+        jobTable.setSurrendersFocusOnKeystroke(true);
+        jobTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
+        JTextField editorField = new JTextField();
+        editorField.setFont(Fonts.body(14f));
+        editorField.setHorizontalAlignment(SwingConstants.CENTER);
+        DefaultCellEditor excelEditor = new DefaultCellEditor(editorField) {
+            private static final long serialVersionUID = 1L;
+            @Override public Component getTableCellEditorComponent(JTable tb, Object val, boolean isSel, int r, int c) {
+                JTextField tf = (JTextField) super.getTableCellEditorComponent(tb, val, isSel, r, c);
+                SwingUtilities.invokeLater(tf::selectAll);
+                return tf;
+            }
+        };
+        excelEditor.setClickCountToStart(1);
+        jobTable.setDefaultEditor(Object.class, excelEditor);
+        editorField.addActionListener(e -> SwingUtilities.invokeLater(() -> {
+            if (jobTable != null && jobTable.getActionMap().get("excelNext") != null) {
+                jobTable.getActionMap().get("excelNext").actionPerformed(null);
+            }
+        }));
+        final int[] hoverRow = {-1};
+        final int[] hoverCol = {-1};
+        DefaultTableCellRenderer center = new DefaultTableCellRenderer() {
+            private static final long serialVersionUID = 1L;
+            @Override public Component getTableCellRendererComponent(JTable tb, Object v, boolean s, boolean f, int r, int c) {
+                Component comp = super.getTableCellRendererComponent(tb, v, s, f, r, c);
+                boolean isDel = showDel && c == 3;
+                if (isDel && hoverRow[0] == r && hoverCol[0] == c) {
+                    comp.setBackground(new Color(255, 79, 168, Theme.dark ? 85 : 55));
+                } else if (!s) {
+                    if (hoverRow[0] == r) {
+                        comp.setBackground(Theme.dark ? new Color(255, 255, 255, 18) : new Color(255, 79, 168, 18));
+                    } else {
+                        comp.setBackground(r % 2 == 0 ? Theme.panel() : Theme.panel2());
+                    }
+                }
+                comp.setForeground(isDel ? Theme.pink() : c == 0 ? Theme.muted() : Theme.text());
+                if (comp instanceof JComponent jc) jc.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10));
+                return comp;
+            }
+        };
+        center.setHorizontalAlignment(SwingConstants.CENTER);
+        jobTable.setDefaultRenderer(Object.class, center);
+        JTableHeader th = new JTableHeader(jobTable.getColumnModel()) {
+            private static final long serialVersionUID = 1L;
+            @Override public String getToolTipText(java.awt.event.MouseEvent e) {
+                int col = columnAtPoint(e.getPoint());
+                return switch (col) {
+                    case 0 -> "Job identifier (J1..Jn)";
+                    case 1 -> "Arrival Time — decimal minutes (e.g. 7.4) or HH:mm (e.g. 10:00)";
+                    case 2 -> "Burst Time — CPU time required in minutes";
+                    case 3 -> showDel ? "Click × on a row to delete it" : null;
+                    default -> null;
+                };
+            }
+        };
+        jobTable.setTableHeader(th);
+        ToolTipManager.sharedInstance().registerComponent(th);
+        th.setFont(Fonts.label(10f));
+        th.setPreferredSize(new Dimension(th.getPreferredSize().width, 32));
+        th.setBackground(Theme.panel2());
+        th.setForeground(Theme.muted());
+        jobTable.getColumnModel().getColumn(0).setPreferredWidth(70);
+        jobTable.getColumnModel().getColumn(1).setPreferredWidth(185);
+        jobTable.getColumnModel().getColumn(2).setPreferredWidth(185);
+        jobTable.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+            @Override public void mouseMoved(java.awt.event.MouseEvent e) {
+                int r = jobTable.rowAtPoint(e.getPoint()), c = jobTable.columnAtPoint(e.getPoint());
+                if (r != hoverRow[0] || c != hoverCol[0]) {
+                    hoverRow[0] = r; hoverCol[0] = c;
+                    jobTable.setCursor(showDel && c == 3
+                            ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+                    jobTable.repaint();
+                }
+            }
+        });
+        if (showDel) {
+            jobTable.getColumnModel().getColumn(3).setPreferredWidth(40);
+            jobTable.getColumnModel().getColumn(3).setMaxWidth(46);
+            jobTable.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                    hoverRow[0] = -1; hoverCol[0] = -1;
+                    jobTable.setCursor(Cursor.getDefaultCursor());
+                    jobTable.repaint();
+                }
+                @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                    int col = jobTable.columnAtPoint(e.getPoint());
+                    int row = jobTable.rowAtPoint(e.getPoint());
+                    if (col == 3 && row >= 0 && row < jobs.size() && jobs.size() > 1) {
+                        if (jobTable.getSelectedRowCount() > 1) {
+                            removeSelectedJobs();
+                            return;
+                        }
+                        saveFields();
+                        pushUndo();
+                        jobs.remove(row);
+                        jobTable = null;
+                        jobTableModel = null;
+                        rebuildInputs();
+                        markInputsDirty();
+                        showToast(MultiprogrammingModule.this, "Removed J" + (row + 1) + " · Ctrl+Z to undo");
+                    }
+                }
+            });
+        }
+        jobTable.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, java.awt.event.InputEvent.CTRL_DOWN_MASK), "runSim");
+        jobTable.getActionMap().put("runSim", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { onRunPressed(); }
+        });
+
+        jobTable.getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), "clearCells");
+        jobTable.getActionMap().put("clearCells", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { clearSelectedCells(); }
+        });
+        jobTable.getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_C, java.awt.event.InputEvent.CTRL_DOWN_MASK), "copyExcel");
+        jobTable.getActionMap().put("copyExcel", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { copySelectedJobs(); }
+        });
+        jobTable.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_V, java.awt.event.InputEvent.CTRL_DOWN_MASK), "pasteExcel");
+        jobTable.getActionMap().put("pasteExcel", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { pasteJobsFromClipboard(); }
+        });
+        jobTable.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "excelNext");
+        jobTable.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "excelNext");
+        jobTable.getActionMap().put("excelNext", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                int r = jobTable.getSelectedRow(), c = jobTable.getSelectedColumn();
+                if (jobTable.isEditing()) jobTable.getCellEditor().stopCellEditing();
+                if (r < 0) r = 0;
+                if (c < 1) c = 1;
+                if (c < 2) {
+                    jobTable.changeSelection(r, 2, false, false);
+                } else if (r + 1 < jobs.size()) {
+                    jobTable.changeSelection(r + 1, 1, false, false);
+                } else {
+                    resizeJobs(jobs.size() + 1);
+                    SwingUtilities.invokeLater(() -> {
+                        if (jobTable != null && jobTable.getRowCount() > 0) {
+                            jobTable.changeSelection(jobTable.getRowCount() - 1, 1, false, false);
+                            jobTable.requestFocusInWindow();
+                        }
+                    });
+                }
+            }
+        });
+
+        JScrollPane sp = new JScrollPane(jobTable);
+        sp.setAlignmentX(LEFT_ALIGNMENT);
+        sp.setBorder(BorderFactory.createLineBorder(Theme.inputLine(), 1));
+        sp.getVerticalScrollBar().setUnitIncrement(28);
+        int h = Math.min(260, jobTable.getTableHeader().getPreferredSize().height + jobTable.getRowHeight() * jobs.size() + 4);
+        sp.setPreferredSize(new Dimension(560, h));
+        sp.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
+        jobTable.setFillsViewportHeight(true);
+        sp.getViewport().setBackground(Theme.panel());
+        styleScrollPane(sp);
+        b.add(sp);
         b.add(Box.createVerticalStrut(8));
 
-        // Controls row: +1, +5, -1, [Count] [Set], Paste / Bulk
-        JPanel foot1 = hRow();
+        // Controls row: +1, +5, -1, [Count] [Set], Paste / Bulk (wraps cleanly)
+        JPanel foot1 = new JPanel(new WrapLayout(FlowLayout.LEFT, 6, 4));
+        foot1.setOpaque(false);
+        foot1.setAlignmentX(LEFT_ALIGNMENT);
         DashedPill add1 = new DashedPill("+1");
         add1.addActionListener(e -> resizeJobs(jobs.size() + 1));
         DashedPill add5 = new DashedPill("+5");
         add5.addActionListener(e -> resizeJobs(jobs.size() + 5));
         foot1.add(add1);
-        foot1.add(Box.createHorizontalStrut(6));
         foot1.add(add5);
         if (jobs.size() > 1) {
             DashedPill rem = new DashedPill("−1");
             rem.addActionListener(e -> resizeJobs(jobs.size() - 1));
-            foot1.add(Box.createHorizontalStrut(6));
             foot1.add(rem);
         }
-        foot1.add(Box.createHorizontalStrut(10));
         countField = new RoundField(String.valueOf(jobs.size()), 6, 48, 28);
         countField.addActionListener(e -> applyCustomCount());
         DashedPill setBtn = new DashedPill("Set");
@@ -320,15 +455,13 @@ public class MultiprogrammingModule extends FigmaModule {
         pasteBtn.addActionListener(e -> openBulkDialog());
 
         foot1.add(countField);
-        foot1.add(Box.createHorizontalStrut(4));
         foot1.add(setBtn);
-        foot1.add(Box.createHorizontalStrut(8));
         foot1.add(pasteBtn);
         b.add(foot1);
 
         b.add(Box.createVerticalStrut(4));
         JPanel foot2 = hRow();
-        foot2.add(body("AT = arrival · BT = burst time (switches to table at 8+ jobs)", 11, Theme.muted()));
+        foot2.add(body("Click cell to type · Enter/Tab next · Ctrl+C/V Excel · × to remove", 11, Theme.muted()));
         b.add(foot2);
         return b;
     }
@@ -340,17 +473,111 @@ public class MultiprogrammingModule extends FigmaModule {
         while (jobs.size() > clamped) jobs.remove(jobs.size() - 1);
         hasRun = false;
         rebuildInputs();
-        rerun();
+        markInputsDirty();
+    }
+
+    private void copySelectedJobs() {
+        if (jobTable == null) return;
+        saveFields();
+        int[] sel = jobTable.getSelectedRows();
+        if (sel.length == 0) {
+            sel = new int[jobs.size()];
+            for (int i = 0; i < jobs.size(); i++) sel[i] = i;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int r : sel) {
+            if (r < 0 || r >= jobs.size()) continue;
+            sb.append(jobs.get(r)[0]).append('\t').append(jobs.get(r)[1]).append('\n');
+        }
+        Toolkit.getDefaultToolkit().getSystemClipboard()
+                .setContents(new StringSelection(sb.toString()), null);
+        showToast(jobTable, "Copied " + sel.length + " job" + (sel.length == 1 ? "" : "s") + " (Ctrl+V in Excel)");
+    }
+
+    private void clearSelectedCells() {
+        if (jobTable == null) return;
+        int[] selRows = jobTable.getSelectedRows();
+        int[] selCols = jobTable.getSelectedColumns();
+        if (selRows.length == 0 || selCols.length == 0) return;
+        for (int r : selRows) {
+            for (int c : selCols) {
+                if (c == 1 || c == 2) {
+                    jobTableModel.setValueAt("", r, c);
+                    jobs.get(r)[c - 1] = "";
+                }
+            }
+        }
+    }
+
+    private void pasteJobsFromClipboard() {
+        try {
+            String clip = (String) Toolkit.getDefaultToolkit().getSystemClipboard()
+                    .getData(java.awt.datatransfer.DataFlavor.stringFlavor);
+            if (clip == null || clip.isBlank()) return;
+            java.util.List<String[]> parsed = new java.util.ArrayList<>();
+            boolean firstLine = true;
+            for (String line : clip.split("\\R")) {
+                String t = line.trim();
+                if (t.isEmpty()) continue;
+                if (firstLine && !t.matches(".*\\d.*")) { firstLine = false; continue; }
+                firstLine = false;
+                String norm = t.replaceAll("(?<=\\d),(?=\\d{3}(\\D|$))", "");
+                String[] parts = norm.contains("\t") ? norm.split("\\t+") : norm.split("[\\t,;\\s]+");
+                int skip = (parts.length >= 3 && !parts[0].trim().matches("-?\\d+([.,]\\d+)?") && !parts[0].trim().contains(":")) ? 1 : 0;
+                if (parts.length - skip < 2) continue;
+                String a = parts[skip].trim(), b = parts[skip + 1].trim();
+                if (a.matches("-?\\d+,\\d{1,2}")) a = a.replace(',', '.');
+                if (b.matches("-?\\d+,\\d{1,2}")) b = b.replace(',', '.');
+                parsed.add(new String[]{a, b});
+            }
+            if (!parsed.isEmpty()) {
+                pushUndo();
+                jobs.clear();
+                jobs.addAll(parsed);
+                jobTable = null;
+                jobTableModel = null;
+                hasRun = false;
+                rebuildInputs();
+                showToast(this, "Pasted " + parsed.size() + " job(s) from clipboard!");
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void removeSelectedJobs() {
+        if (jobTable == null || jobs.size() <= 1) return;
+        int[] sel = jobTable.getSelectedRows();
+        if (sel.length == 0) {
+            showToast(jobTable, "Select row(s) first (Ctrl/Shift+Click) to remove");
+            return;
+        }
+        if (sel.length >= jobs.size()) {
+            showToast(jobTable, "At least 1 job must remain");
+            return;
+        }
+        saveFields();
+        pushUndo();
+        java.util.Set<Integer> drop = new java.util.HashSet<>();
+        for (int r : sel) drop.add(r);
+        java.util.List<String[]> next = new java.util.ArrayList<>();
+        for (int i = 0; i < jobs.size(); i++) {
+            if (!drop.contains(i)) next.add(jobs.get(i));
+        }
+        jobs.clear();
+        jobs.addAll(next);
+        jobTable = null;
+        jobTableModel = null;
+        rebuildInputs();
+        showToast(this, "Removed " + sel.length + " job" + (sel.length == 1 ? "" : "s"));
     }
 
     private void applyCustomCount() {
         if (countField == null) return;
         try {
             int n = Integer.parseInt(countField.getText().trim());
-            if (n >= 1) resizeJobs(n);
-        } catch (NumberFormatException ignored) {
-            countField.setText(String.valueOf(jobs.size()));
-        }
+            if (n >= 1) { resizeJobs(n); return; }
+        } catch (NumberFormatException ignored) {}
+        countField.setText(String.valueOf(jobs.size()));
+        showToast(this, "Enter a job count of 1 or more");
     }
 
     private void openBulkDialog() {
@@ -535,8 +762,8 @@ public class MultiprogrammingModule extends FigmaModule {
                 jobList.size() + " jobs · " + String.format("%.0f%% I/O wait", p * 100), false));
         cards.add(new SummaryCard("LAST JOB DONE", formatTime(res.endTime, clockMode),
                 "all jobs finished", true));
-        cards.add(new SummaryCard("TOTAL ELAPSED", String.format("%.2f", res.endTime - startMin),
-                String.format("%.2f BT total", totalCpu), false));
+        cards.add(new SummaryCard("TOTAL ELAPSED", String.format("%.3f", res.endTime - startMin),
+                String.format("%.3f BT total", totalCpu), false));
         r.add(cards);
         r.add(Box.createVerticalStrut(14));
 
@@ -737,7 +964,7 @@ public class MultiprogrammingModule extends FigmaModule {
             double rounded = Math.round(value * 100.0) / 100.0;
             if (Math.abs(rounded - Math.rint(rounded)) < 1e-6) return String.format("%.0f", rounded);
             if (Math.abs(rounded * 10 - Math.rint(rounded * 10)) < 1e-6) return String.format("%.1f", rounded);
-            return String.format("%.2f", rounded);
+            return String.format("%.3f", rounded);
         }
         long tenths = Math.round(value * 10.0);
         long wholeMins = tenths / 10;
@@ -1242,7 +1469,7 @@ public class MultiprogrammingModule extends FigmaModule {
             int idx = sliceAt(e.getX());
             if (idx < 0) return null;
             TimelineSlice s = slices.get(idx);
-            return String.format("%s → %s | NJ=%d | CPU Util=%.1f%%",
+            return String.format("%s → %s | NJ=%d | CPU Util=%.3f%%",
                     formatTime(s.from, clockMode), formatTime(s.to, clockMode), s.nj, s.cpuUtil * 100);
         }
 

@@ -43,12 +43,33 @@ public class DiskModule extends FigmaModule {
     private boolean hasRun = false;
     private final transient List<HistoryItem> history = new ArrayList<>();
     private final transient Deque<String[]> undoStack = new ArrayDeque<>();
+    private final transient Deque<String[]> redoStack = new ArrayDeque<>();
     private boolean restoring = false;
 
     private record HistoryItem(String label, String reqs, String head, String max, String algo, boolean dirUp) {}
 
     @Override public String title()    { return "Disk Scheduling"; }
     @Override public String subtitle() { return "Compare seek order and total head movement."; }
+    @Override protected void onUndoPressed() {
+        if (undoStack.isEmpty()) { showToast(this, "Nothing to undo"); return; }
+        if (requests != null) redoStack.push(new String[]{requests.getText(), head.getText(), max.getText()});
+        String[] prev = undoStack.pop();
+        setFields(prev[0], prev[1], prev[2]);
+        hasRun = false;
+        markInputsDirty();
+        showToast(this, "Undid · Ctrl+Y to redo");
+    }
+
+    @Override protected void onRedoPressed() {
+        if (redoStack.isEmpty()) { showToast(this, "Nothing to redo"); return; }
+        if (requests != null) undoStack.push(new String[]{requests.getText(), head.getText(), max.getText()});
+        String[] next = redoStack.pop();
+        setFields(next[0], next[1], next[2]);
+        hasRun = false;
+        markInputsDirty();
+        showToast(this, "Redid change");
+    }
+
     @Override protected String crumb() { return "DISK"; }
     @Override protected String lead()  { return "Order the disk requests and add up the head movement."; }
 
@@ -82,8 +103,8 @@ public class DiskModule extends FigmaModule {
             pushUndo();
             setFields(SAMPLE_REQUESTS, SAMPLE_HEAD, SAMPLE_MAX);
             hasRun = false;
-            rerun();
-            showToast(this, "Loaded sample — press RUN SIMULATION");
+            markInputsDirty();
+            showToast(this, "Loaded 8-request sample — press RUN SIMULATION");
         });
 
         DashedPill largeBtn = new DashedPill("Large sample (25)");
@@ -91,7 +112,7 @@ public class DiskModule extends FigmaModule {
             pushUndo();
             setFields(LARGE_REQUESTS, LARGE_HEAD, LARGE_MAX);
             hasRun = false;
-            rerun();
+            markInputsDirty();
             showToast(this, "Loaded 25 requests — press RUN SIMULATION");
         });
 
@@ -111,25 +132,28 @@ public class DiskModule extends FigmaModule {
             }
             setFields(sb.toString(), String.valueOf(rng.nextInt(m + 1)), String.valueOf(m));
             hasRun = false;
-            rerun();
+            markInputsDirty();
             showToast(this, "Generated 12 tracks — press RUN SIMULATION");
+        });
+
+        DashedPill trimBtn = new DashedPill("−1");
+        trimBtn.setToolTipText("Remove the last request from the queue");
+        trimBtn.addActionListener(e -> {
+            String cur = requests.getText().trim();
+            if (cur.isEmpty()) return;
+            pushUndo();
+            String[] toks = cur.split("[\\s,;]+");
+            String next = toks.length <= 1 ? "" : String.join(" ", java.util.Arrays.copyOf(toks, toks.length - 1));
+            requests.setText(next);
+            markInputsDirty();
+            showToast(this, "Removed last request · Ctrl+Z to undo");
         });
 
         DashedPill histBtn = new DashedPill("History");
         histBtn.addActionListener(e -> showHistoryMenu(histBtn));
 
         DashedPill undoBtn = new DashedPill("Undo");
-        undoBtn.addActionListener(e -> {
-            if (undoStack.isEmpty()) {
-                showToast(this, "Nothing to undo");
-                return;
-            }
-            String[] prev = undoStack.pop();
-            setFields(prev[0], prev[1], prev[2]);
-            hasRun = false;
-            rerun();
-            showToast(this, "Undid last change");
-        });
+        undoBtn.addActionListener(e -> onUndoPressed());
 
         DashedPill clearBtn = new DashedPill("Clear");
         clearBtn.addActionListener(e -> {
@@ -137,7 +161,7 @@ public class DiskModule extends FigmaModule {
             setFields("", "", "");
             hasRun = false;
             rerun();
-            showToast(this, "Cleared inputs");
+            showToast(this, "Cleared · Ctrl+Z to undo");
         });
 
         JLabel countBadge = body(countTracksLabel(requests.getText()), 11, Theme.pink());
@@ -148,20 +172,6 @@ public class DiskModule extends FigmaModule {
             @Override public void changedUpdate(DocumentEvent e) { upd(); }
         });
 
-        tools.add(dirBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(sampleBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(largeBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(randomBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(histBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(undoBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(clearBtn);
-        tools.add(Box.createHorizontalStrut(8));
         DashedPill badBtn = new DashedPill("Invalid input test");
         badBtn.addActionListener(e -> {
             pushUndo();
@@ -170,7 +180,24 @@ public class DiskModule extends FigmaModule {
             rerun();
             showToast(this, "Loaded bad input - the result card shows what to fix");
         });
+
+        tools.add(dirBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(sampleBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(largeBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(randomBtn);
+        tools.add(Box.createHorizontalStrut(8));
         tools.add(badBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(histBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(undoBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(clearBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(trimBtn);
         tools.add(Box.createHorizontalStrut(12));
         tools.add(countBadge);
         p.add(tools, BorderLayout.SOUTH);
@@ -181,7 +208,8 @@ public class DiskModule extends FigmaModule {
         String[] cur = {requests.getText(), head.getText(), max.getText()};
         if (!undoStack.isEmpty() && Arrays.equals(undoStack.peek(), cur)) return;
         undoStack.push(cur);
-        if (undoStack.size() > 15) undoStack.removeLast();
+        redoStack.clear();
+        if (undoStack.size() > 50) undoStack.removeLast();
     }
 
     private void setFields(String r, String h, String m) {
@@ -270,7 +298,7 @@ public class DiskModule extends FigmaModule {
         Row cards = new Row(new GridLayout(1, 3, 12, 0));
         cards.add(new SummaryCard("TOTAL CYLINDERS", String.format("%,d cyl", res.total),
                 reqList.size() + " requests · " + algo, true));
-        cards.add(new SummaryCard("AVERAGE SEEK", String.format("%.2f", res.average),
+        cards.add(new SummaryCard("AVERAGE SEEK", String.format("%.3f", res.average),
                 String.format("%,d ÷ %d requests", res.total, reqList.size()), false));
         cards.add(new SummaryCard("HEAD MOVEMENT", headPos + " → " + lastTrack,
                 res.steps.size() + " moves · " + (dirUp ? "Up (→ " + maxTrack + ")" : "Down (→ 0)"), false));
@@ -321,7 +349,7 @@ public class DiskModule extends FigmaModule {
                     ALGOS[i],
                     formatSequence(headPos, x.steps),
                     String.format("%,d", x.total),
-                    String.format("%.2f", x.average)
+                    String.format("%.3f", x.average)
             };
         }
         r.add(collapsibleSection("COMPARE ALL ALGORITHMS", new CompareTable(cmp, current, totals, minTotal)));
@@ -332,22 +360,9 @@ public class DiskModule extends FigmaModule {
             double pct = 100.0 * saved / maxTotal;
             r.add(Box.createVerticalStrut(10));
             r.add(new Notice(true, "Why it won",
-                    String.format("%s (%d cyl) saved %,d cylinders (%.1f%% less movement) compared to %s (%d cyl).",
+                    String.format("%s (%d cyl) saved %,d cylinders (%.3f%% less movement) compared to %s (%d cyl).",
                             bestAlgo, minTotal, saved, pct, worstAlgo, maxTotal)));
         }
-
-        r.add(Box.createVerticalStrut(10));
-        final int finalHead = headPos, finalMax = maxTrack;
-        DashedPill copyBtn = new DashedPill("Copy summary");
-        copyBtn.addActionListener(e -> {
-            StringBuilder sb = new StringBuilder();
-            sb.append(String.format("Disk Scheduling (%s, head=%d, max=%d)%n", algo, finalHead, finalMax));
-            sb.append(String.format("Total: %d cyl | Average Seek: %.2f%n", res.total, res.average));
-            sb.append("Order: ").append(formatSequence(finalHead, res.steps)).append("\n");
-            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(sb.toString()), null);
-            showToast(this, "Copied summary to clipboard!");
-        });
-        r.add(copyBtn);
     }
 
     private void recordHistory(String label) {
@@ -883,7 +898,7 @@ public class DiskModule extends FigmaModule {
                     "TOTAL",
                     "—",
                     reqCount + " requests",
-                    String.format("Ave = %.2f cyl/req", res.average),
+                    String.format("Ave = %.3f cyl/req", res.average),
                     String.format("%,d cyl", res.total)
             };
             setAlignmentX(LEFT_ALIGNMENT);

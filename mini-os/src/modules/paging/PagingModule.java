@@ -61,6 +61,9 @@ public class PagingModule extends FigmaModule {
 
     @Override public String title()    { return "Paging Lab"; }
     @Override public String subtitle() { return "Page table size, page-to-frame mapping, and logical-to-physical address translation."; }
+    @Override protected void onUndoPressed() { history.undo(this, snapshot(), this::restore); }
+    @Override protected void onRedoPressed() { history.redo(this, snapshot(), this::restore); }
+
     @Override protected String crumb() { return "PAGING"; }
     @Override protected String lead()  { return "Size the page table, then map pages to frames and translate a logical address."; }
 
@@ -130,7 +133,7 @@ public class PagingModule extends FigmaModule {
                 pill("Invalid input test", () -> load(new State("4 KB", "1 GB", "0", "-5", rows(BAD_FRAMES)),
                         "Loaded bad input - the red cells show what to fix")),
                 hist,
-                pill("Undo", () -> history.undo(this, this::restore)),
+                pill("Undo", () -> onUndoPressed()),
                 pill("Clear", () -> load(new State("", "", "", "", blank(frames.size())), "Cleared all fields")));
     }
 
@@ -168,7 +171,7 @@ public class PagingModule extends FigmaModule {
         tPageField = logicalField = null;   // so buildInputs does not copy the old text back
         frames.setRows(st.frames());
         rebuildInputs();
-        rerun();
+        markInputsDirty();
     }
 
     private void load(State st, String toast) {
@@ -207,8 +210,8 @@ public class PagingModule extends FigmaModule {
         history.push(snapshot());
         frames.setRows(pasted);
         rebuildInputs();
-        rerun();
-        showToast(this, "Imported " + pasted.size() + " pages");
+        markInputsDirty();
+        showToast(this, "Imported " + pasted.size() + " pages — press RUN SIMULATION");
     }
 
     /** 1,048,576 KB -> "1 GB", 512 -> "512 KB". */

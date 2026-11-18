@@ -44,11 +44,15 @@ public class EntryGrid {
     private DefaultTableModel model;
     private final Set<Long> invalid = new HashSet<>();
 
-    /** true = always the scrolling table, even for a few entries (no small boxes). */
-    private boolean alwaysTable = false;
+    /** true = always the scrolling Excel-style table, even for a few entries. */
+    private boolean alwaysTable = true;
+    private String[] colTips;
 
     /** Always show the scrolling table, whatever the number of entries. Returns this for chaining. */
     public EntryGrid alwaysTable() { alwaysTable = true; return this; }
+
+    /** Optional tooltips shown when hovering over column headers. */
+    public EntryGrid headerTips(String... tips) { colTips = tips; return this; }
 
     public EntryGrid(String idHead, String[] cols, IntFunction<String> idOf, int boxW, Runnable onEnter) {
         this.idHead = idHead; this.cols = cols; this.idOf = idOf; this.boxW = boxW; this.onEnter = onEnter;
@@ -139,12 +143,12 @@ public class EntryGrid {
                 + (footnote == null ? "" : " · " + footnote), 11, Theme.muted()));
         b.add(head);
         b.add(Box.createVerticalStrut(6));
-        b.add(!alwaysTable && rows.size() <= BOX_LIMIT ? boxes() : table());
+        b.add(!alwaysTable && rows.size() <= BOX_LIMIT ? boxes() : table(resize, bulk, unit));
         b.add(Box.createVerticalStrut(8));
         b.add(controls(resize, bulk, unit));
         b.add(Box.createVerticalStrut(4));
         JPanel note = hRow();
-        note.add(FigmaModule.body(alwaysTable ? legend : legend + " · table at " + (BOX_LIMIT + 1) + "+ " + unit + "s",
+        note.add(FigmaModule.body(legend + " · click cell to type · Enter/Tab next · Ctrl+C/V Excel · × or Del to remove",
                 11, Theme.muted()));
         b.add(note);
         return b;
@@ -186,79 +190,314 @@ public class EntryGrid {
         return grid;
     }
 
-    private JComponent table() {
-        String[] head = new String[cols.length + 1];
+    private JComponent table(IntConsumer resize, Consumer<List<String[]>> bulk, String unit) {
+        boolean showDel = rows.size() > 1;
+        String[] head = new String[cols.length + 1 + (showDel ? 1 : 0)];
         head[0] = idHead;
         System.arraycopy(cols, 0, head, 1, cols.length);
+        if (showDel) head[cols.length + 1] = "";
         model = new DefaultTableModel(head, 0) {
             private static final long serialVersionUID = 1L;
-            @Override public boolean isCellEditable(int row, int col) { return col > 0; }
+            @Override public boolean isCellEditable(int row, int col) { return col > 0 && col <= cols.length; }
         };
         for (int i = 0; i < rows.size(); i++) {
-            Object[] r = new Object[cols.length + 1];
+            Object[] r = new Object[head.length];
             r[0] = idOf.apply(i);
             for (int c = 0; c < cols.length; c++) r[c + 1] = rows.get(i)[c];
+            if (showDel) r[cols.length + 1] = "×";
             model.addRow(r);
         }
-        table = new JTable(model);
+        table = new JTable(model) {
+            private static final long serialVersionUID = 1L;
+            @Override public void changeSelection(int row, int col, boolean toggle, boolean extend) {
+                // Keep multi-row selection intact when clicking × on any selected row
+                if (showDel && col == cols.length + 1 && !toggle && !extend && getSelectedRowCount() > 1 && isRowSelected(row)) {
+                    return;
+                }
+                super.changeSelection(row, col, toggle, extend);
+            }
+        };
         table.setFont(Fonts.body(14f));
-        table.setRowHeight(28);
+        table.setRowHeight(34);
+        table.setRowMargin(2);
+        table.setIntercellSpacing(new Dimension(6, 2));
+        table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         table.setForeground(Theme.text());
         table.setBackground(Theme.input());
         table.setGridColor(Theme.line());
         table.setShowGrid(true);
+        table.setSurrendersFocusOnKeystroke(true);
         table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
+        JTextField editorField = new JTextField();
+        editorField.setFont(Fonts.body(14f));
+        editorField.setHorizontalAlignment(SwingConstants.CENTER);
+        DefaultCellEditor excelEditor = new DefaultCellEditor(editorField) {
+            private static final long serialVersionUID = 1L;
+            @Override public Component getTableCellEditorComponent(JTable tb, Object val, boolean isSel, int r, int c) {
+                JTextField tf = (JTextField) super.getTableCellEditorComponent(tb, val, isSel, r, c);
+                SwingUtilities.invokeLater(tf::selectAll);
+                return tf;
+            }
+        };
+        excelEditor.setClickCountToStart(1);
+        table.setDefaultEditor(Object.class, excelEditor);
+        // Pressing Enter while actively typing in a cell commits AND advances to the next cell in 1 keypress
+        editorField.addActionListener(e -> SwingUtilities.invokeLater(() -> {
+            if (table != null && table.getActionMap().get("excelNext") != null) {
+                table.getActionMap().get("excelNext").actionPerformed(null);
+            }
+        }));
+        model.addTableModelListener(e -> {
+            if (e.getType() == javax.swing.event.TableModelEvent.UPDATE && e.getFirstRow() >= 0 && e.getColumn() > 0 && e.getColumn() <= cols.length) {
+                invalid.remove((long) e.getFirstRow() * 64 + (e.getColumn() - 1));
+                table.repaint();
+            }
+        });
+        final int[] hoverRow = {-1};
+        final int[] hoverCol = {-1};
         DefaultTableCellRenderer center = new DefaultTableCellRenderer() {
             private static final long serialVersionUID = 1L;
             @Override public Component getTableCellRendererComponent(JTable tb, Object v, boolean s, boolean f, int r, int c) {
                 Component comp = super.getTableCellRendererComponent(tb, v, s, f, r, c);
-                boolean bad = c > 0 && invalid.contains((long) r * 64 + (c - 1));
-                if (bad) comp.setBackground(new Color(255, 79, 168, Theme.dark ? 90 : 60));
-                else if (!s) comp.setBackground(r % 2 == 0 ? Theme.panel() : Theme.panel2());
-                comp.setForeground(bad ? Theme.pink() : c == 0 ? Theme.muted() : Theme.text());
+                boolean isDel = showDel && c == cols.length + 1;
+                boolean bad = c > 0 && c <= cols.length && invalid.contains((long) r * 64 + (c - 1));
+                if (bad) {
+                    comp.setBackground(new Color(255, 79, 168, Theme.dark ? 90 : 60));
+                } else if (isDel && hoverRow[0] == r && hoverCol[0] == c) {
+                    comp.setBackground(new Color(255, 79, 168, Theme.dark ? 85 : 55));
+                } else if (!s) {
+                    if (hoverRow[0] == r) {
+                        comp.setBackground(Theme.dark ? new Color(255, 255, 255, 18) : new Color(255, 79, 168, 18));
+                    } else {
+                        comp.setBackground(r % 2 == 0 ? Theme.panel() : Theme.panel2());
+                    }
+                }
+                comp.setForeground(isDel ? Theme.pink() : bad ? Theme.pink() : c == 0 ? Theme.muted() : Theme.text());
+                if (comp instanceof JComponent jc) jc.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10));
                 return comp;
             }
         };
         center.setHorizontalAlignment(SwingConstants.CENTER);
         table.setDefaultRenderer(Object.class, center);
-        JTableHeader th = table.getTableHeader();
-        th.setFont(Fonts.label(9f));
+        JTableHeader th = new JTableHeader(table.getColumnModel()) {
+            private static final long serialVersionUID = 1L;
+            @Override public String getToolTipText(java.awt.event.MouseEvent e) {
+                int col = columnAtPoint(e.getPoint());
+                if (col < 0) return null;
+                if (showDel && col == cols.length + 1) return "Click × on a row to delete it";
+                if (col == 0) return "Row identifier (" + idHead + ")";
+                int idx = col - 1;
+                if (colTips != null && idx < colTips.length && colTips[idx] != null) return colTips[idx];
+                return defaultColTip(cols[idx]);
+            }
+        };
+        table.setTableHeader(th);
+        ToolTipManager.sharedInstance().registerComponent(th);
+        th.setFont(Fonts.label(10f));
+        th.setPreferredSize(new Dimension(th.getPreferredSize().width, 32));
         th.setBackground(Theme.panel2());
         th.setForeground(Theme.muted());
-        table.getColumnModel().getColumn(0).setPreferredWidth(64);
-        for (int c = 1; c <= cols.length; c++) table.getColumnModel().getColumn(c).setPreferredWidth(180);
-        // Enter on the last cell runs the simulation
+        table.getColumnModel().getColumn(0).setPreferredWidth(70);
+        for (int c = 1; c <= cols.length; c++) table.getColumnModel().getColumn(c).setPreferredWidth(190);
+        table.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+            @Override public void mouseMoved(java.awt.event.MouseEvent e) {
+                int r = table.rowAtPoint(e.getPoint()), c = table.columnAtPoint(e.getPoint());
+                if (r != hoverRow[0] || c != hoverCol[0]) {
+                    hoverRow[0] = r; hoverCol[0] = c;
+                    table.setCursor(showDel && c == cols.length + 1
+                            ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+                    table.repaint();
+                }
+            }
+        });
+        if (showDel) {
+            table.getColumnModel().getColumn(cols.length + 1).setPreferredWidth(40);
+            table.getColumnModel().getColumn(cols.length + 1).setMaxWidth(46);
+            table.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                    hoverRow[0] = -1; hoverCol[0] = -1;
+                    table.setCursor(Cursor.getDefaultCursor());
+                    table.repaint();
+                }
+                @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                    int col = table.columnAtPoint(e.getPoint());
+                    int row = table.rowAtPoint(e.getPoint());
+                    if (col == cols.length + 1 && row >= 0 && row < rows.size() && rows.size() > 1) {
+                        int[] sel = table.getSelectedRows();
+                        boolean multi = sel.length > 1;
+                        if (multi) {
+                            removeSelectedRows(bulk, unit);
+                            return;
+                        }
+                        save();
+                        String removedId = idOf.apply(row);
+                        List<String[]> next = new ArrayList<>();
+                        for (int i = 0; i < rows.size(); i++) {
+                            if (i != row) next.add(rows.get(i).clone());
+                        }
+                        bulk.accept(next);
+                        FigmaModule.showToast(table, "Removed " + removedId + " · Ctrl+Z to undo");
+                    }
+                }
+            });
+        }
+        // Ctrl+Enter runs simulation; Ctrl+V pastes directly from Excel/Notepad
         table.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
                 .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, java.awt.event.InputEvent.CTRL_DOWN_MASK), "runSim");
         table.getActionMap().put("runSim", new AbstractAction() {
             private static final long serialVersionUID = 1L;
             @Override public void actionPerformed(java.awt.event.ActionEvent e) { onEnter.run(); }
         });
+        table.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_V, java.awt.event.InputEvent.CTRL_DOWN_MASK), "pasteExcel");
+        table.getActionMap().put("pasteExcel", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                try {
+                    String clip = (String) Toolkit.getDefaultToolkit().getSystemClipboard()
+                            .getData(java.awt.datatransfer.DataFlavor.stringFlavor);
+                    List<String[]> parsed = parseBulk(clip);
+                    if (!parsed.isEmpty()) {
+                        bulk.accept(parsed);
+                        FigmaModule.showToast(table, "Pasted " + parsed.size() + " " + unit + "(s) from clipboard!");
+                    }
+                } catch (Exception ignored) {}
+            }
+        });
+
+        table.getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), "clearCells");
+        table.getActionMap().put("clearCells", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { clearSelectedCells(); }
+        });
+        table.getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_C, java.awt.event.InputEvent.CTRL_DOWN_MASK), "copyExcel");
+        table.getActionMap().put("copyExcel", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { copySelectedRows(unit); }
+        });
+        // Excel-style Enter / Tab navigation; Enter on the last row adds a new row
+        table.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "excelNext");
+        table.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "excelNext");
+        table.getActionMap().put("excelNext", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                int r = table.getSelectedRow(), c = table.getSelectedColumn();
+                if (table.isEditing()) table.getCellEditor().stopCellEditing();
+                if (r < 0) r = 0;
+                if (c < 1) c = 1;
+                if (c < cols.length) {
+                    table.changeSelection(r, c + 1, false, false);
+                } else if (r + 1 < rows.size()) {
+                    table.changeSelection(r + 1, 1, false, false);
+                } else {
+                    resize.accept(rows.size() + 1);
+                    SwingUtilities.invokeLater(() -> {
+                        if (table != null && table.getRowCount() > 0) {
+                            table.changeSelection(table.getRowCount() - 1, 1, false, false);
+                            table.requestFocusInWindow();
+                        }
+                    });
+                }
+            }
+        });
 
         JScrollPane sp = new JScrollPane(table);
         sp.setAlignmentX(Component.LEFT_ALIGNMENT);
         sp.setBorder(BorderFactory.createLineBorder(Theme.inputLine(), 1));
-        // fit the rows (header + one line each), up to 210px, then scroll; no grey gap under short tables
-        int h = Math.min(210, table.getTableHeader().getPreferredSize().height + table.getRowHeight() * rows.size() + 3);
-        sp.setPreferredSize(new Dimension(460, h));
-        sp.setMaximumSize(new Dimension(560, h));
+        sp.getVerticalScrollBar().setUnitIncrement(28);
+        // fit the rows (header + one line each), up to 260px, then scroll; no grey gap under short tables
+        int h = Math.min(260, table.getTableHeader().getPreferredSize().height + table.getRowHeight() * rows.size() + 4);
+        sp.setPreferredSize(new Dimension(660, h));
+        sp.setMaximumSize(new Dimension(860, h));
         table.setFillsViewportHeight(true);
         sp.getViewport().setBackground(Theme.panel());
         FigmaModule.styleScrollPane(sp);
         return sp;
     }
 
-    /** +1 · +5 · −1 · [count] Set · Paste / Bulk */
+    private void copySelectedRows(String unit) {
+        if (table == null) return;
+        save();
+        int[] sel = table.getSelectedRows();
+        if (sel.length == 0) {
+            sel = new int[rows.size()];
+            for (int i = 0; i < rows.size(); i++) sel[i] = i;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int r : sel) {
+            if (r < 0 || r >= rows.size()) continue;
+            sb.append(String.join("\t", rows.get(r))).append('\n');
+        }
+        Toolkit.getDefaultToolkit().getSystemClipboard()
+                .setContents(new java.awt.datatransfer.StringSelection(sb.toString()), null);
+        FigmaModule.showToast(table, "Copied " + sel.length + " " + unit + (sel.length == 1 ? "" : "s") + " (Ctrl+V in Excel)");
+    }
+
+    private static String defaultColTip(String col) {
+        return switch (col.toUpperCase()) {
+            case "AT" -> "Arrival Time — when the job enters the ready queue";
+            case "RT" -> "Run / Burst Time — total CPU time required";
+            case "BT" -> "Burst Time — CPU time needed by the job";
+            case "PRI" -> "Priority — lower number = higher priority (1 is highest)";
+            case "FRAME" -> "Physical memory frame number (- = not in memory / page fault)";
+            case "LIMIT" -> "Segment Limit — maximum valid offset length for this segment";
+            case "BASE" -> "Base Address — starting physical address of this segment";
+            default -> col;
+        };
+    }
+
+    private void clearSelectedCells() {
+        if (table == null) return;
+        int[] selRows = table.getSelectedRows();
+        int[] selCols = table.getSelectedColumns();
+        if (selRows.length == 0 || selCols.length == 0) return;
+        for (int r : selRows) {
+            for (int c : selCols) {
+                if (c > 0 && c <= cols.length) {
+                    model.setValueAt("", r, c);
+                    rows.get(r)[c - 1] = "";
+                }
+            }
+        }
+    }
+
+    private void removeSelectedRows(Consumer<List<String[]>> bulk, String unit) {
+        if (table == null || rows.size() <= 1) return;
+        int[] sel = table.getSelectedRows();
+        if (sel.length == 0) {
+            FigmaModule.showToast(table, "Select row(s) first (Ctrl/Shift+Click) to remove");
+            return;
+        }
+        if (sel.length >= rows.size()) {
+            FigmaModule.showToast(table, "At least 1 " + unit + " must remain");
+            return;
+        }
+        save();
+        Set<Integer> drop = new HashSet<>();
+        for (int r : sel) drop.add(r);
+        List<String[]> next = new ArrayList<>();
+        for (int i = 0; i < rows.size(); i++) {
+            if (!drop.contains(i)) next.add(rows.get(i).clone());
+        }
+        String label = sel.length == 1 ? idOf.apply(sel[0]) : sel.length + " " + unit + "s";
+        bulk.accept(next);
+        FigmaModule.showToast(table, "Removed " + label + " · Ctrl+Z to undo");
+    }
+
+    /** +1 · +5 · −1 · Remove selected · [count] Set · Paste / Bulk (wraps cleanly on narrow/scaled screens) */
     private JComponent controls(IntConsumer resize, Consumer<List<String[]>> bulk, String unit) {
-        JPanel row = hRow();
+        JPanel row = new JPanel(new FigmaModule.WrapLayout(FlowLayout.LEFT, 6, 4));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.add(pill("+1", () -> resize.accept(rows.size() + 1)));
-        row.add(Box.createHorizontalStrut(6));
         row.add(pill("+5", () -> resize.accept(rows.size() + 5)));
         if (rows.size() > 1) {
-            row.add(Box.createHorizontalStrut(6));
             row.add(pill("−1", () -> resize.accept(rows.size() - 1)));
         }
-        row.add(Box.createHorizontalStrut(10));
         RoundField count = new RoundField(String.valueOf(rows.size()), 6, 48, 28);
         Runnable apply = () -> {
             try {
@@ -270,9 +509,7 @@ public class EntryGrid {
         };
         count.addActionListener(e -> apply.run());
         row.add(count);
-        row.add(Box.createHorizontalStrut(4));
         row.add(pill("Set", apply));
-        row.add(Box.createHorizontalStrut(8));
         DashedPill paste = new DashedPill("Paste / Bulk");
         paste.addActionListener(e -> {
             List<String[]> parsed = bulkDialog(paste, unit);
@@ -302,19 +539,38 @@ public class EntryGrid {
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (ok != JOptionPane.OK_OPTION) return null;
 
+        List<String[]> parsed = parseBulk(area.getText());
+        if (parsed.isEmpty()) { FigmaModule.showToast(parent, "Nothing to import - use one " + unit + " per line"); return null; }
+        return parsed;
+    }
+
+    private List<String[]> parseBulk(String text) {
         List<String[]> parsed = new ArrayList<>();
-        for (String line : area.getText().split("\\R")) {
+        if (text == null) return parsed;
+        boolean firstLine = true;
+        for (String line : text.split("\\R")) {
             String t = line.trim();
             if (t.isEmpty()) continue;
-            String[] parts = t.split("[\\t,;\\s]+");
+            // Skip Excel header row (e.g. "J#\tAT\tRT" or "LIMIT\tBASE") if it has no digits
+            if (firstLine && !t.matches(".*\\d.*")) {
+                firstLine = false;
+                continue;
+            }
+            firstLine = false;
+            // Strip thousands commas (1,000 -> 1000) and support tab/semicolon/space separation
+            String norm = t.replaceAll("(?<=\\d),(?=\\d{3}(\\D|$))", "");
+            String[] parts = norm.contains("\t") ? norm.split("\\t+") : norm.split("[\\t,;\\s]+");
             // a leading label that is not a number (e.g. "J1" or "P1") is an ID column: skip it
-            int skip = parts.length > 1 && !parts[0].matches("-?\\d+") && !parts[0].equals("-") ? 1 : 0;
+            int skip = parts.length > 1 && !parts[0].trim().matches("-?\\d+([.,]\\d+)?") && !parts[0].trim().equals("-") ? 1 : 0;
             if (parts.length - skip < 2 && cols.length > 1) continue;   // need at least the first two values
             String[] r = new String[cols.length];
-            for (int c = 0; c < cols.length; c++) r[c] = skip + c < parts.length ? parts[skip + c].trim() : "";   // missing -> blank
+            for (int c = 0; c < cols.length; c++) {
+                String val = skip + c < parts.length ? parts[skip + c].trim() : "";
+                if (val.matches("-?\\d+,\\d{1,2}")) val = val.replace(',', '.');
+                r[c] = val;
+            }
             parsed.add(r);
         }
-        if (parsed.isEmpty()) { FigmaModule.showToast(parent, "Nothing to import - use one " + unit + " per line"); return null; }
         return parsed;
     }
 
