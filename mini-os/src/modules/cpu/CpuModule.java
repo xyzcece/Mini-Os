@@ -194,8 +194,11 @@ public class CpuModule extends FigmaModule {
 
     /** "JOBS" box: boxes for up to 7 jobs, a scrolling table for 8+, and the +1 / +5 / −1 / Set / Paste row. */
     private JComponent jobBox() {
+        // PRI only matters to the Priority algorithms; for FIFO / SJF / SRT / RR it is hidden (values are kept)
+        boolean prio = algoChoice.startsWith("Priority");
+        grid.showColumns(prio ? 3 : 2);
         return grid.box("JOBS", "job", "times in minutes",
-                "PRI: 1 = highest, used by Priority",
+                "AT = arrival time  ·  RT = run time" + (prio ? "  ·  PRI = priority (1 = highest)" : ""),
                 this::resizeJobs, this::bulkLoad);
     }
 
@@ -315,7 +318,7 @@ public class CpuModule extends FigmaModule {
                 continue;
             }
             if (ALGOS[i].startsWith("Priority") && list.stream().anyMatch(j -> j.pri == null)) {   // PRI not filled in
-                cmp[i] = new String[]{ALGOS[i] + " - fill in PRI", "—", "—"};
+                cmp[i] = new String[]{ALGOS[i] + " (pick it to set PRI)", "—", "—"};
                 continue;
             }
             Result x = schedule(ALGOS[i], list, q == null ? 1 : q);
