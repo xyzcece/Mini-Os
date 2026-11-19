@@ -9,10 +9,11 @@ import javax.swing.border.EmptyBorder;
 import shared.Fonts;
 import shared.Theme;
 
-/** Run this file to start Mini OS. Shows a 1-second pixel boot splash, then opens the desktop. */
+/** Entry point for Hyperpuff – Mini Operating System. */
 public class Main {
     public static void main(String[] args) {
         System.setProperty("awt.useSystemAAFontSettings", "on");
+        System.setProperty("sun.awt.noerasebackground", "true");
         SwingUtilities.invokeLater(Main::showSplashAndLaunch);
     }
 
@@ -48,14 +49,14 @@ public class Main {
 
                 g.setFont(Fonts.pixel(28f));
                 g.setColor(Theme.text());
-                String title = "MINI OS";
+                String title = "HYPERPUFF";
                 int tw = g.getFontMetrics().stringWidth(title);
                 g.drawString(title, (w - tw) / 2, y + g.getFontMetrics().getAscent());
                 y += g.getFontMetrics().getHeight() + 4;
 
                 g.setFont(Fonts.arcade(8f));
                 g.setColor(Theme.pink());
-                String sub = "UMAK OS LAB SIMULATOR";
+                String sub = "MINI OPERATING SYSTEM";
                 int sw = g.getFontMetrics().stringWidth(sub);
                 g.drawString(sub, (w - sw) / 2, y + g.getFontMetrics().getAscent());
                 y += 26;
@@ -90,6 +91,7 @@ public class Main {
         splash.setContentPane(card);
         splash.pack();
         splash.setLocationRelativeTo(null);
+        splash.setAlwaysOnTop(true);
         splash.setVisible(true);
 
         new Timer(22, e -> {
@@ -102,10 +104,14 @@ public class Main {
                 os.setBackground(Theme.bg());
                 os.getContentPane().setBackground(Theme.bg());
                 os.setExtendedState(os.getExtendedState() | JFrame.MAXIMIZED_BOTH);
-                splash.dispose();
                 os.setVisible(true);
-                os.toFront();
-                os.requestFocus();
+                Timer reveal = new Timer(140, ev -> {
+                    splash.dispose();
+                    os.toFront();
+                    os.requestFocus();
+                });
+                reveal.setRepeats(false);
+                reveal.start();
             } else {
                 card.repaint();
             }

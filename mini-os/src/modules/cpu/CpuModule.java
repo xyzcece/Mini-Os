@@ -177,6 +177,7 @@ public class CpuModule extends FigmaModule {
 
     /** +1 / +5 / −1 / Set: changes the number of jobs, keeping what was typed (with Undo). */
     private void resizeJobs(int n) {
+        n = clampRows(n, "jobs");
         history.push(snapshot());
         grid.resize(n);
         rebuildInputs();
@@ -194,8 +195,11 @@ public class CpuModule extends FigmaModule {
 
     /** "JOBS" box: boxes for up to 7 jobs, a scrolling table for 8+, and the +1 / +5 / −1 / Set / Paste row. */
     private JComponent jobBox() {
+        // PRI only matters to the Priority algorithms; for FIFO / SJF / SRT / RR it is hidden (values are kept)
+        boolean prio = algoChoice.startsWith("Priority");
+        grid.showColumns(prio ? 3 : 2);
         return grid.box("JOBS", "job", "times in minutes",
-                "PRI: 1 = highest, used by Priority",
+                "AT = arrival time  ·  RT = run time" + (prio ? "  ·  PRI = priority (1 = highest)" : ""),
                 this::resizeJobs, this::bulkLoad);
     }
 
@@ -294,11 +298,23 @@ public class CpuModule extends FigmaModule {
         r.add(Box.createVerticalStrut(10));
 
         // 3) Gantt chart
-        r.add(pixelText("GANTT CHART", 7f, Theme.muted(), 0f));
-        r.add(Box.createVerticalStrut(10));
         Map<String, Integer> colorOf = new HashMap<>();
         for (Job j : list) colorOf.put(j.id, j.order);
-        r.add(new Gantt(res.segments, colorOf));
+        Gantt gantt = new Gantt(res.segments, colorOf);
+        Row ganttHdr = new Row(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        ganttHdr.add(pixelText("GANTT CHART", 7f, Theme.muted(), 0f));
+        DashedPill replayBtn = new DashedPill("Replay");
+        replayBtn.addActionListener(e -> gantt.play());
+        DashedPill stepBtn = new DashedPill("Step");
+        stepBtn.addActionListener(e -> gantt.stepOnce());
+        DashedPill allBtn = new DashedPill("Show all");
+        allBtn.addActionListener(e -> gantt.showAll());
+        ganttHdr.add(replayBtn);
+        ganttHdr.add(stepBtn);
+        ganttHdr.add(allBtn);
+        r.add(ganttHdr);
+        r.add(Box.createVerticalStrut(10));
+        r.add(gantt);
         r.add(Box.createVerticalStrut(6));
         r.add(body("Order: " + runOrder(res), 12, Theme.muted()));
 
@@ -315,7 +331,7 @@ public class CpuModule extends FigmaModule {
                 continue;
             }
             if (ALGOS[i].startsWith("Priority") && list.stream().anyMatch(j -> j.pri == null)) {   // PRI not filled in
-                cmp[i] = new String[]{ALGOS[i] + " - fill in PRI", "—", "—"};
+                cmp[i] = new String[]{ALGOS[i] + " (pick it to set PRI)", "—", "—"};
                 continue;
             }
             Result x = schedule(ALGOS[i], list, q == null ? 1 : q);
@@ -664,9 +680,38 @@ public class CpuModule extends FigmaModule {
         private static final long serialVersionUID = 1L;
         static final int BAR = 34;
         private final transient List<Segment> segs; private final transient Map<String, Integer> colorOf;
+        private double animProgress;
+        private javax.swing.Timer animTimer;
         Gantt(List<Segment> segs, Map<String, Integer> colorOf) {
             this.segs = segs; this.colorOf = colorOf;
+            this.animProgress = segs.size();
             setAlignmentX(LEFT_ALIGNMENT);
+        }
+        void play() {
+            if (segs.isEmpty()) return;
+            if (animTimer != null && animTimer.isRunning()) animTimer.stop();
+            animProgress = 0;
+            animTimer = new javax.swing.Timer(22, e -> {
+                animProgress += 0.14;
+                if (animProgress >= segs.size()) {
+                    animProgress = segs.size();
+                    ((javax.swing.Timer) e.getSource()).stop();
+                }
+                repaint();
+            });
+            animTimer.start();
+        }
+        void stepOnce() {
+            if (segs.isEmpty()) return;
+            if (animTimer != null && animTimer.isRunning()) animTimer.stop();
+            int cur = (int) Math.floor(animProgress);
+            animProgress = cur >= segs.size() ? 1 : Math.min(segs.size(), cur + 1);
+            repaint();
+        }
+        void showAll() {
+            if (animTimer != null && animTimer.isRunning()) animTimer.stop();
+            animProgress = segs.size();
+            repaint();
         }
         @Override public Dimension getPreferredSize() { return new Dimension(300, BAR + 3 + 2 + 16); }
         @Override public Dimension getMaximumSize()   { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
@@ -678,13 +723,21 @@ public class CpuModule extends FigmaModule {
             double scale = (w - 3) / (double) Math.max(1, end - start);
             RoundRectangle2D bar = new RoundRectangle2D.Double(0.75, 0.75, w - 1.5, BAR + 1.5, 16, 16);
 
+            g2.setColor(Theme.panel());
+            g2.fill(bar);
+
             Shape oldClip = g2.getClip();
             g2.clip(bar);
             g2.setFont(Fonts.body(13f));
-            for (Segment s : segs) {
-                double x1 = 1.5 + (s.from - start) * scale, x2 = 1.5 + (s.to - start) * scale;
+            int fullCount = (int) Math.floor(animProgress);
+            double frac = animProgress - fullCount;
+            for (int i = 0; i < segs.size(); i++) {
+                if (i > fullCount || (i == fullCount && frac <= 0.001)) break;
+                Segment s = segs.get(i);
+                double x1 = 1.5 + (s.from - start) * scale, x2Full = 1.5 + (s.to - start) * scale;
+                double x2 = i < fullCount ? x2Full : x1 + (x2Full - x1) * frac;
                 g2.setColor(s.id == null ? Theme.panel2() : blockColor(colorOf.getOrDefault(s.id, 0), 1));
-                g2.fill(new Rectangle.Double(x1, 0, x2 - x1, BAR + 3));
+                g2.fill(new Rectangle.Double(x1, 0, Math.max(0, x2 - x1), BAR + 3));
                 g2.setColor(Theme.panel()); g2.setStroke(new BasicStroke(1f));
                 g2.draw(new java.awt.geom.Line2D.Double(x2, 0, x2, BAR + 3));
                 String label = s.id == null ? "idle" : "J" + s.id;
@@ -696,12 +749,13 @@ public class CpuModule extends FigmaModule {
             g2.setClip(oldClip);
             g2.setColor(Theme.line()); g2.setStroke(new BasicStroke(1.5f)); g2.draw(bar);
 
-            // time marks at every block edge, centred on the edge, kept inside the chart and not overlapping
+            // time marks at every visible block edge
             g2.setFont(Fonts.body(10f)); g2.setColor(Theme.muted());
             FontMetrics fm = g2.getFontMetrics();
             List<Integer> marks = new ArrayList<>();
-            for (Segment s : segs) marks.add(s.from);
-            marks.add(end);
+            int visibleEdges = Math.min(segs.size(), (int) Math.ceil(animProgress));
+            for (int i = 0; i < visibleEdges; i++) marks.add(segs.get(i).from);
+            if (visibleEdges > 0) marks.add(segs.get(visibleEdges - 1).to);
             double lastRight = -100;
             for (int t : marks) {
                 String s = String.valueOf(t);

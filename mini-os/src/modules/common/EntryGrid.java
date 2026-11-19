@@ -4,6 +4,7 @@ import java.awt.*;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -54,6 +55,20 @@ public class EntryGrid {
     /** Optional tooltips shown when hovering over column headers. */
     public EntryGrid headerTips(String... tips) { colTips = tips; return this; }
 
+    /** How many value columns are on screen (the rest stay in rows(), just hidden); -1 = all. */
+    private int shown = -1;
+
+    /**
+     * Shows only the first n value columns; the hidden ones keep their values (save the grid first,
+     * then rebuild the box). Returns this for chaining.
+     */
+    public EntryGrid showColumns(int n) {
+        if (n != shown) { save(); shown = n; discard(); }
+        return this;
+    }
+
+    private int visibleCount() { return shown < 0 ? cols.length : Math.min(shown, cols.length); }
+
     public EntryGrid(String idHead, String[] cols, IntFunction<String> idOf, int boxW, Runnable onEnter) {
         this.idHead = idHead; this.cols = cols; this.idOf = idOf; this.boxW = boxW; this.onEnter = onEnter;
     }
@@ -79,7 +94,8 @@ public class EntryGrid {
     /** Grows or shrinks to n entries (at least 1), keeping what was typed. */
     public void resize(int n) {
         save();
-        n = Math.max(1, n);
+        // Lower AND upper bound: an unbounded count used to allocate rows until the app died.
+        n = Math.min(FigmaModule.MAX_ROWS, Math.max(1, n));
         while (rows.size() < n) rows.add(new String[cols.length]);
         for (String[] r : rows) for (int c = 0; c < r.length; c++) if (r[c] == null) r[c] = "";
         while (rows.size() > n) rows.remove(rows.size() - 1);
@@ -88,10 +104,11 @@ public class EntryGrid {
 
     /** Copies whatever is typed on screen back into rows(). */
     public void save() {
+        int nc = visibleCount();
         if (table != null && model != null) {
             if (table.isEditing()) table.getCellEditor().stopCellEditing();
             for (int i = 0; i < Math.min(rows.size(), model.getRowCount()); i++)
-                for (int c = 0; c < cols.length; c++) {
+                for (int c = 0; c < nc; c++) {
                     Object v = model.getValueAt(i, c + 1);
                     rows.get(i)[c] = v == null ? "" : v.toString().trim();
                 }
@@ -99,7 +116,7 @@ public class EntryGrid {
         }
         if (fields.size() != rows.size()) return;
         for (int i = 0; i < rows.size(); i++)
-            for (int c = 0; c < cols.length; c++) rows.get(i)[c] = fields.get(i)[c].getText().trim();
+            for (int c = 0; c < nc; c++) rows.get(i)[c] = fields.get(i)[c].getText().trim();
     }
 
     private void discard() {
@@ -146,36 +163,34 @@ public class EntryGrid {
         b.add(!alwaysTable && rows.size() <= BOX_LIMIT ? boxes() : table(resize, bulk, unit));
         b.add(Box.createVerticalStrut(8));
         b.add(controls(resize, bulk, unit));
-        b.add(Box.createVerticalStrut(4));
-        JPanel note = hRow();
-        note.add(FigmaModule.body(legend + " · click cell to type · Enter/Tab next · Ctrl+C/V Excel · × or Del to remove",
-                11, Theme.muted()));
-        b.add(note);
+        b.add(Box.createVerticalStrut(10));
+        b.add(FigmaModule.shortcutHints(legend, alwaysTable || rows.size() > BOX_LIMIT));
         return b;
     }
 
     private JComponent boxes() {
+        int nc = visibleCount();
         JPanel grid = new JPanel();
         grid.setOpaque(false);
         grid.setLayout(new BoxLayout(grid, BoxLayout.Y_AXIS));
         grid.setAlignmentX(Component.LEFT_ALIGNMENT);
         JPanel ids = hRow();
         ids.add(cell(idHead, 44, 22, Theme.muted()));
-        JPanel[] lines = new JPanel[cols.length];
-        for (int c = 0; c < cols.length; c++) {
+        JPanel[] lines = new JPanel[nc];
+        for (int c = 0; c < nc; c++) {
             lines[c] = hRow();
             lines[c].add(cell(cols[c], 44, 30, Theme.muted()));
         }
         for (int i = 0; i < rows.size(); i++) {
-            RoundField[] f = new RoundField[cols.length];
-            for (int c = 0; c < cols.length; c++) {
+            RoundField[] f = new RoundField[nc];
+            for (int c = 0; c < nc; c++) {
                 f[c] = new RoundField(rows.get(i)[c], 6, boxW, 30);
                 f[c].addActionListener(e -> onEnter.run());
                 final int row = i, col = c;
                 f[c].addKeyListener(new KeyAdapter() {   // Up/Down moves between the value rows
                     @Override public void keyPressed(KeyEvent e) {
                         int to = e.getKeyCode() == KeyEvent.VK_DOWN ? col + 1 : e.getKeyCode() == KeyEvent.VK_UP ? col - 1 : -1;
-                        if (to >= 0 && to < cols.length && row < fields.size()) fields.get(row)[to].requestFocusInWindow();
+                        if (to >= 0 && to < nc && row < fields.size()) fields.get(row)[to].requestFocusInWindow();
                     }
                 });
                 lines[c].add(Box.createHorizontalStrut(6));
@@ -191,27 +206,28 @@ public class EntryGrid {
     }
 
     private JComponent table(IntConsumer resize, Consumer<List<String[]>> bulk, String unit) {
+        final int nc = visibleCount();
         boolean showDel = rows.size() > 1;
-        String[] head = new String[cols.length + 1 + (showDel ? 1 : 0)];
+        String[] head = new String[nc + 1 + (showDel ? 1 : 0)];
         head[0] = idHead;
-        System.arraycopy(cols, 0, head, 1, cols.length);
-        if (showDel) head[cols.length + 1] = "";
+        System.arraycopy(cols, 0, head, 1, nc);
+        if (showDel) head[nc + 1] = "";
         model = new DefaultTableModel(head, 0) {
             private static final long serialVersionUID = 1L;
-            @Override public boolean isCellEditable(int row, int col) { return col > 0 && col <= cols.length; }
+            @Override public boolean isCellEditable(int row, int col) { return col > 0 && col <= nc; }
         };
         for (int i = 0; i < rows.size(); i++) {
             Object[] r = new Object[head.length];
             r[0] = idOf.apply(i);
-            for (int c = 0; c < cols.length; c++) r[c + 1] = rows.get(i)[c];
-            if (showDel) r[cols.length + 1] = "×";
+            for (int c = 0; c < nc; c++) r[c + 1] = rows.get(i)[c];
+            if (showDel) r[nc + 1] = "×";
             model.addRow(r);
         }
         table = new JTable(model) {
             private static final long serialVersionUID = 1L;
             @Override public void changeSelection(int row, int col, boolean toggle, boolean extend) {
                 // Keep multi-row selection intact when clicking × on any selected row
-                if (showDel && col == cols.length + 1 && !toggle && !extend && getSelectedRowCount() > 1 && isRowSelected(row)) {
+                if (showDel && col == nc + 1 && !toggle && !extend && getSelectedRowCount() > 1 && isRowSelected(row)) {
                     return;
                 }
                 super.changeSelection(row, col, toggle, extend);
@@ -231,8 +247,32 @@ public class EntryGrid {
         JTextField editorField = new JTextField();
         editorField.setFont(Fonts.body(14f));
         editorField.setHorizontalAlignment(SwingConstants.CENTER);
+        editorField.addKeyListener(new KeyAdapter() {
+            @Override public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_DELETE) {
+                    if (table != null && table.getSelectedRowCount() > 1) {
+                        if (table.isEditing()) table.getCellEditor().stopCellEditing();
+                        clearSelectedCells();
+                        e.consume();
+                        return;
+                    }
+                    if (editorField.getSelectionStart() == editorField.getSelectionEnd()
+                            && editorField.getCaretPosition() == editorField.getDocument().getLength()
+                            && editorField.getDocument().getLength() > 0) {
+                        editorField.setText("");
+                        e.consume();
+                    }
+                }
+            }
+        });
         DefaultCellEditor excelEditor = new DefaultCellEditor(editorField) {
             private static final long serialVersionUID = 1L;
+            @Override public boolean isCellEditable(java.util.EventObject anEvent) {
+                if (anEvent instanceof java.awt.event.MouseEvent me && (me.isShiftDown() || me.isControlDown())) {
+                    return false;
+                }
+                return super.isCellEditable(anEvent);
+            }
             @Override public Component getTableCellEditorComponent(JTable tb, Object val, boolean isSel, int r, int c) {
                 JTextField tf = (JTextField) super.getTableCellEditorComponent(tb, val, isSel, r, c);
                 SwingUtilities.invokeLater(tf::selectAll);
@@ -248,7 +288,7 @@ public class EntryGrid {
             }
         }));
         model.addTableModelListener(e -> {
-            if (e.getType() == javax.swing.event.TableModelEvent.UPDATE && e.getFirstRow() >= 0 && e.getColumn() > 0 && e.getColumn() <= cols.length) {
+            if (e.getType() == javax.swing.event.TableModelEvent.UPDATE && e.getFirstRow() >= 0 && e.getColumn() > 0 && e.getColumn() <= nc) {
                 invalid.remove((long) e.getFirstRow() * 64 + (e.getColumn() - 1));
                 table.repaint();
             }
@@ -259,8 +299,8 @@ public class EntryGrid {
             private static final long serialVersionUID = 1L;
             @Override public Component getTableCellRendererComponent(JTable tb, Object v, boolean s, boolean f, int r, int c) {
                 Component comp = super.getTableCellRendererComponent(tb, v, s, f, r, c);
-                boolean isDel = showDel && c == cols.length + 1;
-                boolean bad = c > 0 && c <= cols.length && invalid.contains((long) r * 64 + (c - 1));
+                boolean isDel = showDel && c == nc + 1;
+                boolean bad = c > 0 && c <= nc && invalid.contains((long) r * 64 + (c - 1));
                 if (bad) {
                     comp.setBackground(new Color(255, 79, 168, Theme.dark ? 90 : 60));
                 } else if (isDel && hoverRow[0] == r && hoverCol[0] == c) {
@@ -284,7 +324,7 @@ public class EntryGrid {
             @Override public String getToolTipText(java.awt.event.MouseEvent e) {
                 int col = columnAtPoint(e.getPoint());
                 if (col < 0) return null;
-                if (showDel && col == cols.length + 1) return "Click × on a row to delete it";
+                if (showDel && col == nc + 1) return "Click × on a row to delete it";
                 if (col == 0) return "Row identifier (" + idHead + ")";
                 int idx = col - 1;
                 if (colTips != null && idx < colTips.length && colTips[idx] != null) return colTips[idx];
@@ -298,21 +338,21 @@ public class EntryGrid {
         th.setBackground(Theme.panel2());
         th.setForeground(Theme.muted());
         table.getColumnModel().getColumn(0).setPreferredWidth(70);
-        for (int c = 1; c <= cols.length; c++) table.getColumnModel().getColumn(c).setPreferredWidth(190);
+        for (int c = 1; c <= nc; c++) table.getColumnModel().getColumn(c).setPreferredWidth(190);
         table.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
             @Override public void mouseMoved(java.awt.event.MouseEvent e) {
                 int r = table.rowAtPoint(e.getPoint()), c = table.columnAtPoint(e.getPoint());
                 if (r != hoverRow[0] || c != hoverCol[0]) {
                     hoverRow[0] = r; hoverCol[0] = c;
-                    table.setCursor(showDel && c == cols.length + 1
+                    table.setCursor(showDel && c == nc + 1
                             ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
                     table.repaint();
                 }
             }
         });
         if (showDel) {
-            table.getColumnModel().getColumn(cols.length + 1).setPreferredWidth(40);
-            table.getColumnModel().getColumn(cols.length + 1).setMaxWidth(46);
+            table.getColumnModel().getColumn(nc + 1).setPreferredWidth(40);
+            table.getColumnModel().getColumn(nc + 1).setMaxWidth(46);
             table.addMouseListener(new java.awt.event.MouseAdapter() {
                 @Override public void mouseExited(java.awt.event.MouseEvent e) {
                     hoverRow[0] = -1; hoverCol[0] = -1;
@@ -322,7 +362,7 @@ public class EntryGrid {
                 @Override public void mouseClicked(java.awt.event.MouseEvent e) {
                     int col = table.columnAtPoint(e.getPoint());
                     int row = table.rowAtPoint(e.getPoint());
-                    if (col == cols.length + 1 && row >= 0 && row < rows.size() && rows.size() > 1) {
+                    if (col == nc + 1 && row >= 0 && row < rows.size() && rows.size() > 1) {
                         int[] sel = table.getSelectedRows();
                         boolean multi = sel.length > 1;
                         if (multi) {
@@ -389,7 +429,7 @@ public class EntryGrid {
                 if (table.isEditing()) table.getCellEditor().stopCellEditing();
                 if (r < 0) r = 0;
                 if (c < 1) c = 1;
-                if (c < cols.length) {
+                if (c < nc) {
                     table.changeSelection(r, c + 1, false, false);
                 } else if (r + 1 < rows.size()) {
                     table.changeSelection(r + 1, 1, false, false);
@@ -430,7 +470,7 @@ public class EntryGrid {
         StringBuilder sb = new StringBuilder();
         for (int r : sel) {
             if (r < 0 || r >= rows.size()) continue;
-            sb.append(String.join("\t", rows.get(r))).append('\n');
+            sb.append(String.join("\t", Arrays.copyOf(rows.get(r), visibleCount()))).append('\n');
         }
         Toolkit.getDefaultToolkit().getSystemClipboard()
                 .setContents(new java.awt.datatransfer.StringSelection(sb.toString()), null);
@@ -451,17 +491,35 @@ public class EntryGrid {
     }
 
     private void clearSelectedCells() {
+        int nc = visibleCount();
         if (table == null) return;
+        if (table.isEditing()) table.getCellEditor().stopCellEditing();
         int[] selRows = table.getSelectedRows();
-        int[] selCols = table.getSelectedColumns();
-        if (selRows.length == 0 || selCols.length == 0) return;
+        if (selRows.length == 0) return;
+
+        boolean wholeRows = selRows.length > 1;
+        int selCol = table.getSelectedColumn();
+        if (!wholeRows && (selCol < 1 || selCol > nc)) wholeRows = true;
+
+        int cleared = 0;
         for (int r : selRows) {
-            for (int c : selCols) {
-                if (c > 0 && c <= cols.length) {
+            if (r < 0 || r >= rows.size()) continue;
+            if (wholeRows) {
+                for (int c = 1; c <= nc; c++) {
                     model.setValueAt("", r, c);
                     rows.get(r)[c - 1] = "";
+                    cleared++;
                 }
+            } else {
+                model.setValueAt("", r, selCol);
+                rows.get(r)[selCol - 1] = "";
+                cleared++;
             }
+        }
+        if (cleared > 0) {
+            FigmaModule.showToast(table, selRows.length > 1
+                    ? "Cleared " + selRows.length + " rows"
+                    : (wholeRows ? "Cleared row " + idOf.apply(selRows[0]) : "Cleared cell"));
         }
     }
 
@@ -525,14 +583,16 @@ public class EntryGrid {
         JTextArea area = new JTextArea(10, 28);
         area.setFont(Fonts.body(14f));
         StringBuilder existing = new StringBuilder();
-        for (String[] r : rows) {
+        int nc = visibleCount();
+        for (String[] full : rows) {
+            String[] r = Arrays.copyOf(full, nc);
             boolean any = false;
             for (String v : r) any |= !v.isEmpty();
             if (any) existing.append(String.join(", ", r)).append('\n');
         }
         area.setText(existing.toString());
         JPanel panel = new JPanel(new BorderLayout(0, 6));
-        panel.add(new JLabel("Paste one " + unit + " per line (" + String.join(", ", cols) + " - or tab-separated from Excel):"),
+        panel.add(new JLabel("Paste one " + unit + " per line (" + String.join(", ", Arrays.copyOf(cols, nc)) + " - or tab-separated from Excel):"),
                 BorderLayout.NORTH);
         panel.add(new JScrollPane(area), BorderLayout.CENTER);
         int ok = JOptionPane.showConfirmDialog(parent, panel, "Bulk Paste " + Character.toUpperCase(unit.charAt(0)) + unit.substring(1) + "s",
@@ -567,6 +627,8 @@ public class EntryGrid {
             for (int c = 0; c < cols.length; c++) {
                 String val = skip + c < parts.length ? parts[skip + c].trim() : "";
                 if (val.matches("-?\\d+,\\d{1,2}")) val = val.replace(',', '.');
+                // a hidden column left blank keeps the value it already had on that line
+                if (c >= visibleCount() && val.isEmpty() && parsed.size() < rows.size()) val = rows.get(parsed.size())[c];
                 r[c] = val;
             }
             parsed.add(r);

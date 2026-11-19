@@ -335,7 +335,7 @@ public class FragmentationModule extends FigmaModule {
 
     @Override protected void onRunPressed() {
         hasRun = true;
-        rerun();
+        super.onRunPressed();
     }
 
     @Override protected void runSimulation(JPanel r) {
@@ -373,6 +373,9 @@ public class FragmentationModule extends FigmaModule {
                 r.add(Box.createVerticalStrut(6));
                 r.add(new Notice(false, "Also", procErr));
             }
+            r.add(Box.createVerticalStrut(6));
+            r.add(body(String.format("Rule: every block and process size is a whole number from 1 to %,d KB, "
+                    + "separated by spaces or commas.", MAX_SIZE), 12, Theme.muted()));
             return;
         }
 
@@ -431,8 +434,12 @@ public class FragmentationModule extends FigmaModule {
         r.add(Box.createVerticalStrut(12));
 
         r.add(new FormulaStrip(String.format(
-                "Free space %,d KB is spread over %d gap(s); the largest single gap is %,d KB.",
+                "External fragmentation = %,d KB free, split across %d gap(s); the largest single gap is %,d KB.",
                 plan.freeSpace, plan.gapCount, plan.largestGap)));
+        r.add(Box.createVerticalStrut(6));
+        r.add(new FormulaStrip(String.format(
+                "Internal fragmentation = %,d KB - each process gets exactly its own size, nothing wasted inside.",
+                plan.internal)));
         r.add(Box.createVerticalStrut(8));
         if (plan.unallocated > 0) {
             StringBuilder sb = new StringBuilder();
@@ -453,9 +460,9 @@ public class FragmentationModule extends FigmaModule {
             r.add(new Notice(true, "All allocated",
                     String.format("Every process found a gap, with %,d KB still free.", plan.freeSpace)));
             r.add(Box.createVerticalStrut(6));
-            r.add(body("Each process takes exactly its own size out of a block, so there is no internal "
-                    + "fragmentation here - the leftover gaps between blocks are external fragmentation.",
-                    12, Theme.muted()));
+            r.add(body(String.format("Internal fragmentation is %,d KB because each process takes exactly its "
+                    + "own size out of a block; the %,d KB of leftover gaps between blocks is external "
+                    + "fragmentation.", plan.internal, plan.freeSpace), 12, Theme.muted()));
         }
         r.add(Box.createVerticalStrut(14));
 
@@ -570,7 +577,7 @@ public class FragmentationModule extends FigmaModule {
     static int[] parseSizes(String raw, String what) {
         String trimmed = raw == null ? "" : raw.trim();
         if (trimmed.isEmpty())
-            throw new IllegalArgumentException("type at least one " + what + " size.");
+            throw new IllegalArgumentException("type at least one " + what + " size");
         String[] parts = trimmed.split("[\\s,]+");
         List<Integer> out = new ArrayList<>();
         int pos = 0;
@@ -581,17 +588,17 @@ public class FragmentationModule extends FigmaModule {
             try {
                 v = Long.parseLong(p);
             } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(what + " #" + pos + " (\"" + p + "\") is not a whole number.");
+                throw new IllegalArgumentException(what + " " + pos + " (\"" + p + "\") is not a whole number");
             }
             if (v <= 0)
-                throw new IllegalArgumentException(what + " #" + pos + " (\"" + p + "\") must be more than 0.");
+                throw new IllegalArgumentException(what + " " + pos + " (\"" + p + "\") must be more than 0");
             if (v > MAX_SIZE)
                 throw new IllegalArgumentException(String.format(
-                        "%s #%d (\"%s\") is too big - keep each %s size at %,d KB or less.", what, pos, p, what, MAX_SIZE));
+                        "%s %d (\"%s\") is too big - keep each %s size at %,d KB or less", what, pos, p, what, MAX_SIZE));
             out.add((int) v);
         }
         if (out.isEmpty())
-            throw new IllegalArgumentException("type at least one " + what + " size.");
+            throw new IllegalArgumentException("type at least one " + what + " size");
         int[] arr = new int[out.size()];
         for (int i = 0; i < arr.length; i++) arr[i] = out.get(i);
         return arr;
@@ -611,6 +618,7 @@ public class FragmentationModule extends FigmaModule {
         final int[] blockSizes, procSizes, remaining, placedIn;
         final List<List<Seg>> segments = new ArrayList<>();   // one list per block, in placement order
         int placed, unallocated, usedBlocks, largestGap, gapCount;
+        long internal;          // memory handed out minus memory actually asked for
         long freeSpace, totalMemory;
 
         Plan(int[] blockSizes, int[] procSizes) {
@@ -672,7 +680,8 @@ public class FragmentationModule extends FigmaModule {
             out.add(String.format("P%d (%,d KB): fits in %s → %s picks Block %d → %,d KB left there.",
                     i, procSizes[i], cand, policy, chosen, free[chosen]));
         }
-        out.add(String.format("Free space = %,d KB in %d gap(s), largest %,d KB.", plan.freeSpace, plan.gapCount, plan.largestGap));
+        out.add(String.format("External fragmentation = %,d KB in %d gap(s), largest %,d KB.", plan.freeSpace, plan.gapCount, plan.largestGap));
+        out.add(String.format("Internal fragmentation = %,d KB.", plan.internal));
         if (plan.unallocated > 0 && plan.freeSpace > 0)
             out.add("External fragmentation: there is free memory, but it is split into gaps that are each too small for the waiting process(es).");
         return out;
@@ -705,6 +714,14 @@ public class FragmentationModule extends FigmaModule {
                 plan.unallocated++;
             }
         }
+
+        // Internal fragmentation = what was handed out minus what the processes asked for.
+        // Variable partitions cut the exact size out of a hole, so this comes to zero; it is
+        // worked out rather than assumed so the figure stays right if the model ever changes.
+        long handedOut = 0, requested = 0;
+        for (int b = 0; b < n; b++) handedOut += blockSizes[b] - plan.remaining[b];
+        for (int i = 0; i < procSizes.length; i++) if (plan.placedIn[i] >= 0) requested += procSizes[i];
+        plan.internal = handedOut - requested;
 
         for (int b = 0; b < blockSizes.length; b++) {
             plan.totalMemory += blockSizes[b];

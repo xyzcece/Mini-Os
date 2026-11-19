@@ -21,10 +21,7 @@ import java.io.File;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
-/**
- * The Mini OS desktop: wallpaper + app window (title bar, sidebar, module area) + taskbar.
- * OWNER: Member 3. This is the ONLY file where modules are plugged in (see MODULES below).
- */
+/** Hyperpuff desktop shell: wallpaper, module window (title bar, sidebar, content), and taskbar. */
 public class MiniOS extends JFrame {
 
     // ---- the 8 modules: name, folder icon, screen ----
@@ -39,6 +36,7 @@ public class MiniOS extends JFrame {
     private final CardLayout cards = new CardLayout();
     private final JPanel content = new JPanel(cards);
     private final JScrollPane[] scrollPanes = new JScrollPane[MODULES.length];
+    private final modules.common.FigmaModule.PixelButton[] floatTopBtns = new modules.common.FigmaModule.PixelButton[MODULES.length];
     private JComponent taskbarPanel;
     private final JPanel sidebar = new JPanel() {
         @Override protected void paintComponent(Graphics g) { paintSidebar((Graphics2D) g, this); }
@@ -53,7 +51,7 @@ public class MiniOS extends JFrame {
     private int active = 0;
 
     public MiniOS() {
-        super("Mini OS – OS Lab");
+        super("Hyperpuff – Mini Operating System");
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosing(java.awt.event.WindowEvent e) {
@@ -64,11 +62,8 @@ public class MiniOS extends JFrame {
                         break;
                     }
                 }
-                if (hasInputs) {
-                    int ans = JOptionPane.showConfirmDialog(MiniOS.this,
-                            "You have entered inputs in one or more modules.\nAre you sure you want to exit Mini OS?",
-                            "Confirm Exit", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
-                    if (ans != JOptionPane.YES_OPTION) return;
+                if (hasInputs && !confirmExitDialog()) {
+                    return;
                 }
                 dispose();
                 System.exit(0);
@@ -145,12 +140,56 @@ public class MiniOS extends JFrame {
         desktop.add(taskbarPanel, BorderLayout.SOUTH);
 
         for (int i = 0; i < MODULES.length; i++) {
+            final int idx = i;
             JScrollPane sp = new JScrollPane(MODULES[i]);
             sp.setBorder(null); sp.getViewport().setOpaque(false); sp.setOpaque(false);
             sp.getVerticalScrollBar().setUnitIncrement(16);
             modules.common.FigmaModule.styleScrollPane(sp);
+
+            modules.common.FigmaModule.PixelButton floatTop = new modules.common.FigmaModule.PixelButton("TOP", true);
+            floatTop.setToolTipText("Scroll smoothly back to the top");
+            floatTop.setOpacity(0f);
+            floatTop.setVisible(false);
+            floatTop.addActionListener(e -> {
+                if (MODULES[idx] instanceof modules.common.FigmaModule fm) fm.smoothScrollToTop();
+                else sp.getVerticalScrollBar().setValue(0);
+            });
+            final Timer[] fadeTimer = { null };
+            final boolean[] targetVis = { false };
+            sp.getVerticalScrollBar().addAdjustmentListener(e -> {
+                boolean show = sp.getVerticalScrollBar().getValue() > 220;
+                if (show == targetVis[0]) return;
+                targetVis[0] = show;
+                if (show) floatTop.setVisible(true);
+                if (fadeTimer[0] != null && fadeTimer[0].isRunning()) fadeTimer[0].stop();
+                fadeTimer[0] = new Timer(18, ev -> {
+                    float cur = floatTop.getOpacity();
+                    float next = show ? Math.min(1f, cur + 0.16f) : Math.max(0f, cur - 0.16f);
+                    floatTop.setOpacity(next);
+                    if ((show && next >= 1f) || (!show && next <= 0f)) {
+                        if (!show) floatTop.setVisible(false);
+                        ((Timer) ev.getSource()).stop();
+                    }
+                });
+                fadeTimer[0].start();
+            });
+
+            JLayeredPane layer = new JLayeredPane() {
+                @Override public void doLayout() {
+                    int w = getWidth(), h = getHeight();
+                    sp.setBounds(0, 0, w, h);
+                    Dimension d = floatTop.getPreferredSize();
+                    int sbW = sp.getVerticalScrollBar().isVisible() ? sp.getVerticalScrollBar().getWidth() : 0;
+                    floatTop.setBounds(Math.max(0, w - d.width - sbW - 22), Math.max(0, h - d.height - 18), d.width, d.height);
+                }
+            };
+            layer.setOpaque(false);
+            layer.add(sp, JLayeredPane.DEFAULT_LAYER);
+            layer.add(floatTop, JLayeredPane.PALETTE_LAYER);
+
             scrollPanes[i] = sp;
-            content.add(sp, String.valueOf(i));
+            floatTopBtns[i] = floatTop;
+            content.add(layer, String.valueOf(i));
         }
         content.setOpaque(false);
 
@@ -159,6 +198,9 @@ public class MiniOS extends JFrame {
             int savedScroll = scrollPanes[active] != null ? scrollPanes[active].getVerticalScrollBar().getValue() : 0;
             setBackground(Theme.bg());
             desktop.setBackground(Theme.bg());
+            for (modules.common.FigmaModule.PixelButton b : floatTopBtns) {
+                if (b != null) { b.setForeground(Theme.text()); b.repaint(); }
+            }
             buildWindow();
             if (taskbarPanel != null) taskbarPanel.repaint();
             desktop.repaint();
@@ -188,6 +230,10 @@ public class MiniOS extends JFrame {
         im.put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_F11, 0), "toggleMax");
         am.put("toggleMax", new AbstractAction() {
             @Override public void actionPerformed(java.awt.event.ActionEvent e) { if (window.isVisible()) toggleMaximize(); }
+        });
+        im.put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_F1, 0), "quickHelp");
+        am.put("quickHelp", new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) { showHelpDialog(); }
         });
         im.put(KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_0, java.awt.event.InputEvent.CTRL_DOWN_MASK), "zoomReset");
         am.put("zoomReset", new AbstractAction() {
@@ -271,9 +317,9 @@ public class MiniOS extends JFrame {
         brand.setBorder(new EmptyBorder(0, 6, 10, 4));
         brand.setAlignmentX(LEFT_ALIGNMENT);
         if (!sidebarCollapsed) {
-            brand.add(new JLabel(icon("heron_bust", 70, 44)));
-            brand.add(Box.createHorizontalStrut(14));
-            brand.add(new ShadowLabel("OS Lab", Fonts.pixel(28f), Theme.dark ? new Color(0xd7b4ff) : new Color(0x6a2ca0),
+            brand.add(new JLabel(icon("heron_bust", 62, 40)));
+            brand.add(Box.createHorizontalStrut(10));
+            brand.add(new ShadowLabel("Hyperpuff", Fonts.pixel(22f), Theme.dark ? new Color(0xd7b4ff) : new Color(0x6a2ca0),
                     Theme.dark ? new Color(0, 0, 0, 153) : new Color(255, 255, 255, 230), Theme.dark ? 2 : 1));
             brand.add(Box.createHorizontalGlue());
         }
@@ -445,27 +491,190 @@ public class MiniOS extends JFrame {
         }
     }
 
+    private boolean confirmExitDialog() {
+        final boolean[] confirmed = { false };
+        JDialog dlg = new JDialog(this, "Confirm Exit", true);
+        dlg.setUndecorated(true);
+
+        JPanel root = new JPanel(new BorderLayout(0, 14)) {
+            @Override protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setPaint(new GradientPaint(0, 0, Theme.bg(), 0, getHeight(), Theme.panel2()));
+                g2.fillRect(0, 0, getWidth(), getHeight());
+                g2.dispose();
+            }
+        };
+        root.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.pink(), 2),
+                new EmptyBorder(16, 20, 16, 20)));
+
+        JPanel hdr = new JPanel(new BorderLayout(10, 0));
+        hdr.setOpaque(false);
+        JLabel title = new JLabel("CONFIRM EXIT — HYPERPUFF");
+        title.setFont(Fonts.arcade(9f));
+        title.setForeground(Theme.pink());
+        hdr.add(title, BorderLayout.WEST);
+        root.add(hdr, BorderLayout.NORTH);
+
+        JPanel msgBox = new JPanel(new BorderLayout());
+        msgBox.setBackground(Theme.panel());
+        msgBox.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.inputLine(), 1),
+                new EmptyBorder(14, 16, 14, 16)));
+        JLabel msg = new JLabel("<html><div style='width:320px;line-height:1.45;'>"
+                + "You have entered inputs in one or more modules.<br>"
+                + "Are you sure you want to exit <b>Hyperpuff</b>?"
+                + "</div></html>");
+        msg.setFont(Fonts.body(14f));
+        msg.setForeground(Theme.text());
+        msgBox.add(msg, BorderLayout.CENTER);
+        root.add(msgBox, BorderLayout.CENTER);
+
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        footer.setOpaque(false);
+        modules.common.FigmaModule.PixelButton cancelBtn = new modules.common.FigmaModule.PixelButton("STAY", false);
+        cancelBtn.addActionListener(e -> dlg.dispose());
+        modules.common.FigmaModule.PixelButton exitBtn = new modules.common.FigmaModule.PixelButton("EXIT", false);
+        exitBtn.setForeground(Theme.pink());
+        exitBtn.addActionListener(e -> {
+            confirmed[0] = true;
+            dlg.dispose();
+        });
+        footer.add(cancelBtn);
+        footer.add(exitBtn);
+        root.add(footer, BorderLayout.SOUTH);
+
+        dlg.getRootPane().registerKeyboardAction(e -> dlg.dispose(),
+                KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0),
+                JComponent.WHEN_IN_FOCUSED_WINDOW);
+        dlg.getRootPane().registerKeyboardAction(e -> {
+                    confirmed[0] = true;
+                    dlg.dispose();
+                },
+                KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER, 0),
+                JComponent.WHEN_IN_FOCUSED_WINDOW);
+
+        dlg.setContentPane(root);
+        dlg.pack();
+        dlg.setLocationRelativeTo(this);
+        dlg.setVisible(true);
+        return confirmed[0];
+    }
+
     private void showHelpDialog() {
         String helpText = """
-                1. CPU Scheduling   — FIFO, SJF, SRT, Round Robin (WT = TAT - RT, TAT = CT - AT)
-                2. Banker's Algo    — Need = Max - Allocation; checks Safe Sequence
-                3. Paging Lab       — Page Table Entries = Address Space / Page Size
-                4. Page Replacement — FIFO, LRU, Optimal (Frame Grid + #FAULT / #HIT)
-                5. Segmentation     — Physical = Base + Offset (valid when 0 <= Offset < Limit)
-                6. Fragmentation    — First / Best / Worst Fit memory allocation
-                7. Disk Scheduling  — FCFS, SSTF, SCAN, C-SCAN, LOOK, C-LOOK (Seek Graph)
-                8. Multiprogramming — %CPU/J = (1 - p^NJ) / NJ; HW/J = ET * (%CPU/J)
-                
-                KEYBOARD SHORTCUTS & TIPS
-                • Ctrl + 1..8   : Switch directly between the 8 OS modules
-                • Ctrl + Enter  : Run simulation in any module
-                • Ctrl + D      : Toggle Light / Dark arcade theme
-                • Ctrl + + / -  : Zoom in / out (85% – 130%)   • Ctrl + 0 : Reset 100%
-                • F11           : Maximize / Restore OS window
-                • Sample pills  : Load small or large test datasets in one click
-                • Copy Output   : Copy simulation summary straight to clipboard
+                ══════════════════════════════════════════════════════════════════════
+                  1. CPU SCHEDULING
+                ══════════════════════════════════════════════════════════════════════
+                  Purpose : Decides which ready process runs on the CPU and in what order.
+                  Algorithms:
+                    • FIFO / FCFS — Runs jobs strictly in Arrival Time (AT) order.
+                    • SJF (Non-Preemptive) — Picks the ready job with the shortest Burst/Run Time (RT).
+                    • SRT (Preemptive SJF) — Always switches to the ready job with the least remaining time.
+                    • Priority (Non-Preemptive / Preemptive) — Lower priority number = higher priority (1 is highest).
+                    • Round Robin (RR) — Gives each ready job a fixed time slice (Quantum q) in turn.
+                  Key Formulas:
+                    • Turnaround Time (TAT) = Completion Time (CT) − Arrival Time (AT)
+                    • Waiting Time (WT)     = Turnaround Time (TAT) − Run/Burst Time (RT)
+                    • AWT = sum(WT) ÷ n     |     ATAT = sum(TAT) ÷ n
+                  Tip: Open "Compare All Algorithms" in the output to see which achieved the lowest AWT/ATAT.
+
+                ══════════════════════════════════════════════════════════════════════
+                  2. BANKER'S ALGORITHM (Deadlock Avoidance)
+                ══════════════════════════════════════════════════════════════════════
+                  Purpose : Checks whether every process can finish without causing deadlock.
+                  Inputs  : Available (free units per resource), Allocation (held), Maximum (max demand).
+                  Key Formula & Safety Rule:
+                    • Need[i] = Maximum[i] − Allocation[i]   (Rule: Allocation can never exceed Maximum)
+                    • Start with Work = Available.
+                    • Repeatedly find an unfinished process P[i] where Need[i] ≤ Work (for all resources).
+                    • When P[i] finishes, it releases its resources: Work = Work + Allocation[i].
+                    • If all processes finish → SAFE (Safe Sequence shown). Otherwise → NOT SAFE (deadlock risk).
+
+                ══════════════════════════════════════════════════════════════════════
+                  3. PAGING LAB (Memory Address Translation)
+                ══════════════════════════════════════════════════════════════════════
+                  Purpose : Maps fixed-size logical pages to physical memory frames.
+                  Key Formulas:
+                    • Page Table Entries = Logical Address Space ÷ Page Size
+                    • Page Number (p)    = Logical Address ÷ Page Size   (integer division)
+                    • Offset (d)         = Logical Address mod Page Size (remainder)
+                    • Physical Address   = (Frame Number × Page Size) + Offset
+                  Note: If a page maps to "-", it is not in memory (Page Fault).
+
+                ══════════════════════════════════════════════════════════════════════
+                  4. PAGE REPLACEMENT
+                ══════════════════════════════════════════════════════════════════════
+                  Purpose : Chooses which page in memory to evict when all frames are full.
+                  Algorithms:
+                    • FIFO    — Evicts the oldest page loaded into memory.
+                    • LRU     — Evicts the page that has not been used for the longest time.
+                    • Optimal — Evicts the page that will not be used for the longest time in the future.
+                  Metrics:
+                    • Page Hit  = requested page is already in a frame.
+                    • Page Fault = requested page is missing and must be loaded.
+                    • Hit Rate = (#Hits ÷ Total Refs) × 100%   |   Fault Rate = (#Faults ÷ Total Refs) × 100%
+
+                ══════════════════════════════════════════════════════════════════════
+                  5. SEGMENTATION
+                ══════════════════════════════════════════════════════════════════════
+                  Purpose : Divides a program into variable-sized logical segments (code, stack, data).
+                  Key Formula & Validation:
+                    • Valid only when: 0 ≤ Offset < Limit
+                    • Physical Address = Base + Offset
+                    • If Offset ≥ Limit (or segment does not exist) → Out-of-Range / Trap error.
+
+                ══════════════════════════════════════════════════════════════════════
+                  6. FRAGMENTATION (Contiguous Memory Allocation)
+                ══════════════════════════════════════════════════════════════════════
+                  Purpose : Allocates variable-sized processes into memory blocks and measures wasted space.
+                  Policies:
+                    • First Fit — Picks the first free block big enough for the process.
+                    • Next Fit  — Like First Fit, but continues searching from the last allocated block.
+                    • Best Fit  — Picks the smallest free block that fits (minimizes leftover hole).
+                    • Worst Fit — Picks the largest free block available.
+                  Key Concepts:
+                    • Internal Fragmentation — Unused space inside an allocated block.
+                    • External Fragmentation — Enough total free memory exists, but split into non-contiguous holes.
+
+                ══════════════════════════════════════════════════════════════════════
+                  7. DISK SCHEDULING
+                ══════════════════════════════════════════════════════════════════════
+                  Purpose : Orders pending disk track requests to minimize disk arm seek time.
+                  Algorithms:
+                    • FCFS — Services tracks in arrival order.
+                    • SSTF — Always moves to the closest pending track (Shortest Seek Time First).
+                    • SCAN / LOOK — Sweeps in one direction then reverses (SCAN hits disk end; LOOK stops at last request).
+                    • C-SCAN / C-LOOK — Sweeps one direction only, then jumps back to the start.
+                  Key Formula:
+                    • Total Head Movement = sum(|next track − current track|)   |   Average Seek = Total ÷ #Requests
+
+                ══════════════════════════════════════════════════════════════════════
+                  8. MULTIPROGRAMMING (CPU Utilization Model)
+                ══════════════════════════════════════════════════════════════════════
+                  Purpose : Simulates multiple jobs sharing CPU time while waiting on I/O.
+                  Key Formulas (p = I/O Wait fraction, NJ = active jobs in memory, ET = interval duration):
+                    • CPU Utilization = 1 − p^NJ
+                    • %CPU per Job    = (1 − p^NJ) ÷ NJ
+                    • Work Done (HW/J)= ET × (%CPU/J)
+
+                ══════════════════════════════════════════════════════════════════════
+                  KEYBOARD SHORTCUTS & TIPS
+                ══════════════════════════════════════════════════════════════════════
+                  • Ctrl + 1..8    : Switch directly between all 8 OS modules
+                  • Ctrl + Enter   : Run simulation in the active module
+                  • Ctrl + Z / Y   : Undo / Redo input changes
+                  • Ctrl + D       : Toggle Light / Dark arcade theme
+                  • Ctrl + + / - / 0 : Zoom in / out (85% – 130%) / reset to 100%
+                  • F1             : Open this Quick Help & Formulas guide
+                  • F11            : Maximize / Restore window
+                  • Delete         : Clear selected cell(s)  |  Shift + Delete (Banker's): Clear full row
+                  • Arrow Keys     : Navigate cells in Banker's Algorithm grids
+                  • Ctrl + V       : Paste rows/columns directly from Excel or Notepad in table modules
+                  • SAVE PNG       : Export the simulation result card as a PNG image
+                  • COPY OUTPUT    : Copy a formatted text summary to clipboard
                 """;
-        JDialog dlg = new JDialog(this, "Mini OS — Quick Help", true);
+        JDialog dlg = new JDialog(this, "Hyperpuff — Quick Help", true);
         dlg.setUndecorated(true);
         JPanel root = new JPanel(new BorderLayout(0, 12)) {
             @Override protected void paintComponent(Graphics g) {
@@ -481,20 +690,26 @@ public class MiniOS extends JFrame {
 
         JPanel hdr = new JPanel(new BorderLayout());
         hdr.setOpaque(false);
-        JLabel title = new JLabel("MINI OS — QUICK HELP & FORMULAS");
+        JLabel title = new JLabel("HYPERPUFF — QUICK HELP & FORMULAS");
         title.setFont(Fonts.arcade(9f));
         title.setForeground(Theme.pink());
         hdr.add(title, BorderLayout.WEST);
+        JLabel hint = new JLabel("Press ESC or click CLOSE");
+        hint.setFont(Fonts.body(12f));
+        hint.setForeground(Theme.muted());
+        hdr.add(hint, BorderLayout.EAST);
         root.add(hdr, BorderLayout.NORTH);
 
         JTextArea area = new JTextArea(helpText);
         area.setEditable(false);
+        area.setCaretPosition(0);
         area.setFont(Fonts.body(13f));
         area.setBackground(Theme.panel());
         area.setForeground(Theme.text());
-        area.setBorder(new EmptyBorder(12, 14, 12, 14));
+        area.setBorder(new EmptyBorder(14, 16, 14, 16));
         JScrollPane sp = new JScrollPane(area);
-        sp.setPreferredSize(new Dimension(620, 340));
+        sp.setPreferredSize(new Dimension(740, 480));
+        sp.getVerticalScrollBar().setUnitIncrement(22);
         sp.setBorder(BorderFactory.createLineBorder(Theme.inputLine(), 1));
         modules.common.FigmaModule.styleScrollPane(sp);
         root.add(sp, BorderLayout.CENTER);

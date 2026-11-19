@@ -18,12 +18,8 @@ import shared.ModulePanel;
 import shared.Theme;
 
 /**
- * Page layout + building blocks from the Figma "mini-os" file, used by Member 1's modules
- * (CPU Scheduling, Segmentation). OWNER: Member 1.
- *
- * Page:  HYPERPUFF bar · breadcrumb / gradient title / subtitle / heron sticker · lead sentence
- *        · inputs · RUN SIMULATION · result card.
- * A module extends this instead of ModulePanel and fills in crumb(), lead(), buildInputs(), runSimulation().
+ * Shared page template and UI components for Hyperpuff OS Lab modules:
+ * header, input section, RUN SIMULATION trigger, and simulation output card.
  */
 public abstract class FigmaModule extends ModulePanel {
     private static final long serialVersionUID = 1L;
@@ -63,7 +59,7 @@ public abstract class FigmaModule extends ModulePanel {
         run.addActionListener(e -> onRunPressed());
         add(pad(run, 15, 16, false));
 
-        staleBanner = new Notice(Theme.orange(), "INPUTS CHANGED", "Press RUN SIMULATION (Ctrl+Enter) to update the output below.");
+        staleBanner = new Notice(Theme.orange(), null, "INPUTS CHANGED", "Press RUN SIMULATION (Ctrl+Enter) to update the output below.");
         staleBanner.setVisible(false);
         add(pad(staleBanner, 0, 10, true));
 
@@ -83,15 +79,10 @@ public abstract class FigmaModule extends ModulePanel {
         copyBtn.setToolTipText("Copy simulation summary to clipboard");
         copyBtn.addActionListener(e -> copyResultsSummary());
 
-        PixelButton topBtn = new PixelButton("BACK TO TOP", true);
-        topBtn.setToolTipText("Scroll smoothly back to the top");
-        topBtn.addActionListener(e -> smoothScrollToTop());
-
         Row topRow = new Row(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         topRow.setBorder(new EmptyBorder(12, 0, 0, 0));
         topRow.add(saveBtn);
         topRow.add(copyBtn);
-        topRow.add(topBtn);
         add(topRow);
 
         // Ctrl+Enter runs simulation, Ctrl+Z triggers undo from anywhere in the module
@@ -137,6 +128,7 @@ public abstract class FigmaModule extends ModulePanel {
     /** Called when RUN SIMULATION (or Ctrl+Enter) is pressed. */
     protected void onRunPressed() {
         rerun();
+        if (resultsCard != null) resultsCard.pulse();
         scrollToResults();
     }
 
@@ -165,7 +157,9 @@ public abstract class FigmaModule extends ModulePanel {
         }
     }
 
-    /** Scrolls the module viewport down to show results/errors after RUN SIMULATION. */
+    private Timer scrollAnimTimer;
+
+    /** Smoothly scrolls the module viewport down to show results/errors after RUN SIMULATION. */
     private void scrollToResults() {
         SwingUtilities.invokeLater(() -> {
             if (resultsCard == null) return;
@@ -173,10 +167,23 @@ public abstract class FigmaModule extends ModulePanel {
             if (sp == null) return;
             JScrollBar vsb = sp.getVerticalScrollBar();
             int viewH = sp.getViewport().getHeight();
-            int targetY = Math.max(0, resultsCard.getY() - 24);
-            if (resultsCard.getY() > vsb.getValue() + (int) (viewH * 0.45)) {
-                vsb.setValue(Math.min(targetY, Math.max(0, vsb.getMaximum() - viewH)));
-            }
+            int maxScroll = Math.max(0, vsb.getMaximum() - viewH);
+            int targetY = Math.min(Math.max(0, resultsCard.getY() - 20), maxScroll);
+            if (targetY <= vsb.getValue() + 8) return;
+            if (scrollAnimTimer != null && scrollAnimTimer.isRunning()) scrollAnimTimer.stop();
+            scrollAnimTimer = new Timer(14, null);
+            scrollAnimTimer.addActionListener(e -> {
+                int cur = vsb.getValue();
+                int diff = targetY - cur;
+                if (diff <= 2) {
+                    vsb.setValue(targetY);
+                    scrollAnimTimer.stop();
+                } else {
+                    int step = Math.max(8, (int) Math.ceil(diff * 0.24));
+                    vsb.setValue(Math.min(targetY, cur + step));
+                }
+            });
+            scrollAnimTimer.start();
         });
     }
 
@@ -219,23 +226,24 @@ public abstract class FigmaModule extends ModulePanel {
     }
 
     /** Smoothly animates the enclosing JScrollPane back to the top. */
-    protected void smoothScrollToTop() {
+    public void smoothScrollToTop() {
         JScrollPane sp = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, this);
         if (sp == null) return;
         JScrollBar vsb = sp.getVerticalScrollBar();
         if (vsb.getValue() <= 0) return;
-        Timer t = new Timer(14, null);
-        t.addActionListener(e -> {
+        if (scrollAnimTimer != null && scrollAnimTimer.isRunning()) scrollAnimTimer.stop();
+        scrollAnimTimer = new Timer(14, null);
+        scrollAnimTimer.addActionListener(e -> {
             int cur = vsb.getValue();
             if (cur <= 2) {
                 vsb.setValue(0);
-                t.stop();
+                scrollAnimTimer.stop();
             } else {
                 int step = Math.max(8, (int) Math.ceil(cur * 0.25));
                 vsb.setValue(Math.max(0, cur - step));
             }
         });
-        t.start();
+        scrollAnimTimer.start();
     }
 
     /** Exports the results card as a PNG image for lab reports or documentation. */
@@ -243,33 +251,53 @@ public abstract class FigmaModule extends ModulePanel {
         JComponent target = resultsCard != null ? resultsCard : results;
         int w = target.getWidth(), h = target.getHeight();
         if (w <= 0 || h <= 0) {
+            Dimension pref = target.getPreferredSize();
+            w = pref.width;
+            h = pref.height;
+        }
+        if (w <= 0 || h <= 0) {
             showToast(this, "Run a simulation first!");
             return;
         }
         String slug = title().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Save Simulation Result as PNG");
-        chooser.setSelectedFile(new File((slug.isEmpty() ? "simulation" : slug) + "-result.png"));
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("PNG Images (*.png)", "png"));
-        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        String defaultName = (slug.isEmpty() ? "simulation" : slug) + "-result.png";
 
-        File out = chooser.getSelectedFile();
-        if (!out.getName().toLowerCase().endsWith(".png")) {
-            out = new File(out.getParentFile(), out.getName() + ".png");
-        }
-        BufferedImage img = new BufferedImage(w + 24, h + 24, BufferedImage.TYPE_INT_RGB);
+        Window win = SwingUtilities.getWindowAncestor(this);
+        Frame owner = win instanceof Frame f ? f : null;
+        FileDialog fd = new FileDialog(owner, "Save Simulation Result as PNG", FileDialog.SAVE);
+        fd.setFile(defaultName);
+        fd.setFilenameFilter((dir, name) -> name.toLowerCase().endsWith(".png"));
+        fd.setVisible(true);
+
+        String dir = fd.getDirectory();
+        String file = fd.getFile();
+        if (dir == null || file == null) return;
+        if (!file.toLowerCase().endsWith(".png")) file = file + ".png";
+        File out = new File(dir, file);
+        if (out.getParentFile() != null) out.getParentFile().mkdirs();
+
+        boolean wasDimmed = resultsStale;
+        if (resultsCard != null && wasDimmed) resultsCard.setDimmed(false);
+        BufferedImage img = new BufferedImage(w + 24, h + 24, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2 = img.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2.setColor(Theme.bg());
         g2.fillRect(0, 0, img.getWidth(), img.getHeight());
         g2.translate(12, 12);
-        target.paint(g2);
+        target.printAll(g2);
         g2.dispose();
+        if (resultsCard != null && wasDimmed) resultsCard.setDimmed(true);
 
         try {
-            ImageIO.write(img, "png", out);
-            showToast(this, "Saved " + out.getName() + "!");
+            boolean written = ImageIO.write(img, "png", out);
+            if (written) {
+                showToast(this, "Saved " + out.getName() + "!");
+            } else {
+                showToast(this, "PNG writer not available");
+            }
         } catch (Exception ex) {
-            showToast(this, "Failed to save PNG");
+            showToast(this, "Failed to save PNG: " + ex.getMessage());
         }
     }
 
@@ -455,6 +483,128 @@ public abstract class FigmaModule extends ModulePanel {
         return midY + (fm.getAscent() - fm.getDescent()) / 2.0;
     }
 
+    // ---------- hint footer under an input table (shared by every module) ----------
+
+    /**
+     * Footer under an input table: a thin divider, the column legend (may be null), then the keyboard
+     * shortcuts as small key caps ([Enter] [Tab] next cell ...). tableMode = the Excel-style table;
+     * false = the small per-entry boxes.
+     */
+    public static JComponent shortcutHints(String legend, boolean tableMode) {
+        JPanel wrap = new JPanel();
+        wrap.setOpaque(false);
+        wrap.setLayout(new BoxLayout(wrap, BoxLayout.Y_AXIS));
+        wrap.setAlignmentX(LEFT_ALIGNMENT);
+
+        JComponent rule = new JComponent() {
+            private static final long serialVersionUID = 1L;
+            @Override protected void paintComponent(Graphics g) {
+                g.setColor(Theme.line());
+                g.fillRect(0, 0, getWidth(), 1);
+            }
+        };
+        rule.setAlignmentX(LEFT_ALIGNMENT);
+        rule.setPreferredSize(new Dimension(10, 1));
+        rule.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+        wrap.add(rule);
+        wrap.add(Box.createVerticalStrut(8));
+
+        if (legend != null && !legend.isBlank()) {
+            JPanel l = new JPanel();
+            l.setOpaque(false);
+            l.setLayout(new BoxLayout(l, BoxLayout.X_AXIS));
+            l.setAlignmentX(LEFT_ALIGNMENT);
+            l.add(body(legend, 11, Theme.text()));
+            wrap.add(l);
+            wrap.add(Box.createVerticalStrut(6));
+        }
+
+        JPanel keys = new JPanel(new WrapLayout(FlowLayout.LEFT, 0, 3)) {
+            private static final long serialVersionUID = 1L;
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
+        keys.setOpaque(false);
+        keys.setAlignmentX(LEFT_ALIGNMENT);
+        keys.setBorder(new EmptyBorder(0, -2, 0, 0));
+        if (tableMode) {
+            shortcut(keys, "type", "Click");
+            shortcut(keys, "next cell", "Enter", "Tab");
+            shortcut(keys, "copy / paste Excel", "Ctrl+C", "Ctrl+V");
+            shortcut(keys, "clear cell", "Del");
+            shortcut(keys, "remove row", "×");
+            shortcut(keys, "run", "Ctrl+Enter");
+        } else {
+            shortcut(keys, "type in a box", "Click");
+            shortcut(keys, "run", "Enter");
+            shortcut(keys, "move between rows", "↑", "↓");
+        }
+        wrap.add(keys);
+        return wrap;
+    }
+
+    /** One "[Key] [Key] what it does" group, with space after it before the next group. */
+    private static void shortcut(JPanel row, String what, String... keyNames) {
+        JPanel g = new JPanel();
+        g.setOpaque(false);
+        g.setLayout(new BoxLayout(g, BoxLayout.X_AXIS));
+        for (int i = 0; i < keyNames.length; i++) {
+            if (i > 0) g.add(Box.createHorizontalStrut(3));
+            g.add(new KeyCap(keyNames[i]));
+        }
+        g.add(Box.createHorizontalStrut(6));
+        JLabel l = body(what, 11, Theme.muted());
+        l.setAlignmentY(CENTER_ALIGNMENT);
+        g.add(l);
+        g.add(Box.createHorizontalStrut(12));
+        row.add(g);
+    }
+
+    /** A small keyboard key: rounded box with a slightly thicker bottom edge. */
+    public static class KeyCap extends JComponent {
+        private static final long serialVersionUID = 1L;
+        private static final java.awt.font.FontRenderContext[] FRCS = {
+                new java.awt.font.FontRenderContext(null, true, true), new java.awt.font.FontRenderContext(null, true, false),
+                new java.awt.font.FontRenderContext(null, false, true), new java.awt.font.FontRenderContext(null, false, false)};
+        private final String key;
+        public KeyCap(String key) {
+            this.key = key;
+            setFont(Fonts.body(10f));
+            setAlignmentY(CENTER_ALIGNMENT);
+        }
+        /** Width the text really took the last time it was painted (screen scaling can make it wider). */
+        private double paintedW;
+        @Override public Dimension getPreferredSize() {
+            // the pixel font draws wider than FontMetrics says (see SafeLabel): measure the widest way it can render
+            double w = Math.max(paintedW, getFontMetrics(getFont()).stringWidth(key));
+            for (java.awt.font.FontRenderContext frc : FRCS) w = Math.max(w, getFont().getStringBounds(key, frc).getWidth());
+            return new Dimension(Math.max(24, (int) Math.ceil(w * 1.12) + 18), 20);
+        }
+        @Override public Dimension getMaximumSize() { return getPreferredSize(); }
+        @Override public Dimension getMinimumSize() { return getPreferredSize(); }
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = smooth(g);
+            int w = getWidth(), h = getHeight();
+            RoundRectangle2D face = new RoundRectangle2D.Double(0.5, 0.5, w - 1, h - 3, 7, 7);
+            g2.setColor(Theme.line());                                   // bottom "depth" edge
+            g2.fill(new RoundRectangle2D.Double(0.5, 1.5, w - 1, h - 2, 7, 7));
+            g2.setColor(Theme.panel2());
+            g2.fill(face);
+            g2.setColor(Theme.line());
+            g2.setStroke(new BasicStroke(1f));
+            g2.draw(face);
+            g2.setFont(getFont());
+            g2.setColor(Theme.text());
+            // measure with the real screen graphics; if the text would touch the edges, grow and lay out again
+            double real = new java.awt.font.TextLayout(key, getFont(), g2.getFontRenderContext()).getAdvance();
+            if (real > paintedW + 0.5) {
+                paintedW = real;
+                if (getPreferredSize().width > w) SwingUtilities.invokeLater(this::revalidate);
+            }
+            centerText(g2, key, w / 2.0, middle(g2, (h - 2) / 2.0));
+            g2.dispose();
+        }
+    }
+
     /** Block colour by index: pink, cyan, yellow, green, purple, orange (repeats). */
     public static Color blockColor(int i, double alpha) {
         Color[] p = {Theme.pink(), Theme.cyan(), Theme.yellow(), Theme.green(), Theme.purple(), Theme.orange()};
@@ -615,6 +765,28 @@ public abstract class FigmaModule extends ModulePanel {
                 @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { setInvalid(false); }
                 @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { setInvalid(false); }
             });
+            addFocusListener(new java.awt.event.FocusAdapter() {
+                @Override public void focusGained(java.awt.event.FocusEvent e) {
+                    repaint();
+                    if (fixed && !e.isTemporary()) SwingUtilities.invokeLater(RoundField.this::selectAll);
+                }
+                @Override public void focusLost(java.awt.event.FocusEvent e) {
+                    repaint();
+                }
+            });
+            if (fixed) {
+                addKeyListener(new java.awt.event.KeyAdapter() {
+                    @Override public void keyPressed(java.awt.event.KeyEvent e) {
+                        if (e.getKeyCode() == java.awt.event.KeyEvent.VK_DELETE
+                                && getSelectionStart() == getSelectionEnd()
+                                && getCaretPosition() == getDocument().getLength()
+                                && getDocument().getLength() > 0) {
+                            setText("");
+                            e.consume();
+                        }
+                    }
+                });
+            }
         }
         @Override public Dimension getPreferredSize() { return new Dimension(prefW, prefH); }
         @Override public Dimension getMinimumSize()   { return new Dimension(fixed ? prefW : 30, prefH); }
@@ -623,12 +795,25 @@ public abstract class FigmaModule extends ModulePanel {
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
             double w = getWidth(), h = getHeight() - 2;
+            boolean focused = isFocusOwner();
             g2.setColor(new Color(184, 74, 140, 20));                        // soft shadow below
-            g2.fill(new RoundRectangle2D.Double(0.75, 2.75, w - 1.5, h - 1.5, arc, arc));
-            RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, w - 1.5, h - 1.5, arc, arc);
+            g2.fill(new RoundRectangle2D.Double(1.5, 3.0, w - 3.0, h - 2.0, arc, arc));
+            RoundRectangle2D box = new RoundRectangle2D.Double(1.5, 1.5, w - 3.0, h - 2.5, arc, arc);
             g2.setColor(Theme.input()); g2.fill(box);
-            g2.setColor(invalid ? Theme.pink() : Theme.inputLine());
-            g2.setStroke(new BasicStroke(invalid ? 2.2f : 1.5f)); g2.draw(box);
+            if (focused) {
+                Color glow = invalid
+                        ? new Color(255, 79, 168, 70)
+                        : (Theme.dark ? new Color(102, 232, 255, 65) : new Color(255, 79, 168, 60));
+                g2.setColor(glow);
+                g2.setStroke(new BasicStroke(3.8f));
+                g2.draw(box);
+            }
+            Color strokeColor = invalid
+                    ? Theme.pink()
+                    : (focused ? (Theme.dark ? Theme.cyan() : Theme.pink()) : Theme.inputLine());
+            g2.setColor(strokeColor);
+            g2.setStroke(new BasicStroke(invalid || focused ? 2.1f : 1.5f));
+            g2.draw(box);
             g2.dispose();
             super.paintComponent(g);
         }
@@ -643,22 +828,37 @@ public abstract class FigmaModule extends ModulePanel {
             setFont(Fonts.arcade(8f)); setForeground(Color.WHITE);
             setContentAreaFilled(false); setBorderPainted(false); setFocusPainted(false);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setToolTipText("Run simulation (Ctrl+Enter)");
         }
         @Override public Dimension getPreferredSize() {
             int tw = getFontMetrics(getFont()).stringWidth(getText());
-            return new Dimension(1 + 19 + tw + 13 + ICON + 12 + 1, H + DROP);
+            return new Dimension(1 + 19 + tw + 13 + ICON + 12 + 1, H + DROP + 4);
         }
         @Override public Dimension getMaximumSize() { return getPreferredSize(); }
 
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
             int w = getWidth();
-            if (getModel().isPressed()) g2.translate(0, 2);
-            g2.setColor(RUN_DROP);
-            g2.fill(new RoundRectangle2D.Double(0, DROP, w, H, H, H));
+            boolean hover = getModel().isRollover();
+            boolean pressed = getModel().isPressed();
+            g2.translate(0, 2);
+            if (pressed) g2.translate(0, 2);
+            else if (hover) g2.translate(0, -1);
+
+            if (hover && !pressed) {
+                g2.setColor(new Color(255, 79, 168, 75));
+                g2.setStroke(new BasicStroke(4f));
+                g2.draw(new RoundRectangle2D.Double(1.5, 1.5, w - 3, H - 3, H, H));
+            }
+            if (!pressed) {
+                g2.setColor(RUN_DROP);
+                g2.fill(new RoundRectangle2D.Double(0, DROP, w, H, H, H));
+            }
             RoundRectangle2D pill = new RoundRectangle2D.Double(0.5, 0.5, w - 1, H - 1, H, H);
-            g2.setPaint(new LinearGradientPaint(0, 0, 0, H, new float[]{0f, .5f, 1f},
-                    new Color[]{new Color(0xff9ccf), new Color(0xff4fa8), new Color(0xd82b85)}));
+            Color[] grad = hover && !pressed
+                    ? new Color[]{new Color(0xffb4dc), new Color(0xff63b3), new Color(0xe3348f)}
+                    : new Color[]{new Color(0xff9ccf), new Color(0xff4fa8), new Color(0xd82b85)};
+            g2.setPaint(new LinearGradientPaint(0, 0, 0, H, new float[]{0f, .5f, 1f}, grad));
             g2.fill(pill);
             g2.setColor(RUN_EDGE); g2.setStroke(new BasicStroke(1f)); g2.draw(pill);
 
@@ -680,30 +880,81 @@ public abstract class FigmaModule extends ModulePanel {
         }
     }
 
-    /** Small dashed pill button, e.g. "+ Add job". */
+    /** Semantic pixel-accented pill button, automatically styled for Light and Dark modes. */
     public static class DashedPill extends JButton {
         private static final long serialVersionUID = 1L;
+        private static final int DOT = 5, DOT_GAP = 7;
+
         public DashedPill(String label) {
             super(label);
-            setFont(Fonts.body(13f)); setForeground(Theme.muted());
+            setFont(Fonts.body(13f)); setForeground(Theme.text());
             setContentAreaFilled(false); setBorderPainted(false); setFocusPainted(false);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         }
+        @Override public void setEnabled(boolean b) {
+            super.setEnabled(b);
+            setCursor(Cursor.getPredefinedCursor(b ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+            repaint();
+        }
+        private Color accent() {
+            String t = getText() == null ? "" : getText().toLowerCase();
+            if (t.contains("clear") || t.contains("invalid") || t.contains("deadlock")
+                    || t.contains("out-of-range") || t.contains("page fault") || t.contains("not-exact")
+                    || t.contains("remove") || t.startsWith("−") || t.startsWith("-")) {
+                return Theme.pink();
+            }
+            if (t.contains("sample") || t.contains("large") || t.contains("idle")) {
+                return Theme.green();
+            }
+            if (t.contains("history") || t.contains("undo") || t.contains("replay")
+                    || t.contains("step") || t.contains("show all") || t.contains("copy") || t.contains("paste")) {
+                return Theme.cyan();
+            }
+            return Theme.purple();
+        }
         @Override public Dimension getPreferredSize() {
             FontMetrics fm = getFontMetrics(getFont());
-            return new Dimension(fm.stringWidth(getText()) + 24 + 3, fm.getHeight() + 10 + 3);
+            return new Dimension(fm.stringWidth(getText()) + 24 + DOT + DOT_GAP + 3, fm.getHeight() + 10 + 3);
         }
         @Override public Dimension getMaximumSize() { return getPreferredSize(); }
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
-            RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, getWidth() - 1.5, getHeight() - 1.5, 28, 28);
-            boolean hover = getModel().isRollover();
-            if (hover) { g2.setColor(Theme.panel2()); g2.fill(box); }
-            g2.setColor(hover ? Theme.pink() : Theme.inputLine());
-            g2.setStroke(new BasicStroke(hover ? 1.8f : 1.5f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND, 10f, new float[]{4f, 3f}, 0f));
+            boolean enabled = isEnabled();
+            if (!enabled) g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.40f));
+            boolean hover = enabled && getModel().isRollover();
+            boolean pressed = enabled && getModel().isPressed();
+            int w = getWidth(), h = getHeight();
+            Color ac = accent();
+
+            if (pressed) g2.translate(0, 1);
+            RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, w - 1.5, h - 1.5, h, h);
+
+            int fillA = hover ? (Theme.dark ? 54 : 46) : (Theme.dark ? 22 : 24);
+            g2.setColor(new Color(ac.getRed(), ac.getGreen(), ac.getBlue(), fillA));
+            g2.fill(box);
+
+            if (hover) {
+                g2.setColor(ac);
+                g2.setStroke(new BasicStroke(1.8f));
+            } else {
+                int borderA = Theme.dark ? 155 : 185;
+                g2.setColor(new Color(ac.getRed(), ac.getGreen(), ac.getBlue(), borderA));
+                g2.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND, 10f, new float[]{4f, 3f}, 0f));
+            }
             g2.draw(box);
-            g2.setFont(getFont()); g2.setColor(hover ? Theme.text() : getForeground());
-            centerText(g2, getText(), getWidth() / 2.0, middle(g2, getHeight() / 2.0));
+
+            g2.setFont(getFont());
+            FontMetrics fm = g2.getFontMetrics();
+            int tw = fm.stringWidth(getText());
+            int totalW = DOT + DOT_GAP + tw;
+            int startX = (w - totalW) / 2;
+
+            // Crisp 5x5 pixel-art status dot
+            g2.setColor(ac);
+            g2.fillRect(startX, (h - DOT) / 2, DOT, DOT);
+
+            g2.setColor(Theme.text());
+            g2.drawString(getText(), startX + DOT + DOT_GAP, (float) middle(g2, h / 2.0));
             g2.dispose();
         }
     }
@@ -713,6 +964,7 @@ public abstract class FigmaModule extends ModulePanel {
         private static final long serialVersionUID = 1L;
         private static final int PX = 2, DROP = 3;
         private final boolean upArrow;
+        private float opacity = 1f;
 
         public PixelButton(String label, boolean upArrow) {
             super(label);
@@ -725,6 +977,15 @@ public abstract class FigmaModule extends ModulePanel {
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         }
 
+        public float getOpacity() { return opacity; }
+        public void setOpacity(float a) {
+            float clamped = Math.max(0f, Math.min(1f, a));
+            if (Math.abs(clamped - opacity) > 0.005f) {
+                opacity = clamped;
+                repaint();
+            }
+        }
+
         @Override public Dimension getPreferredSize() {
             FontMetrics fm = getFontMetrics(getFont());
             int iconW = upArrow ? 14 : 0;
@@ -735,7 +996,9 @@ public abstract class FigmaModule extends ModulePanel {
         @Override public Dimension getMaximumSize() { return getPreferredSize(); }
 
         @Override protected void paintComponent(Graphics g) {
+            if (opacity <= 0.01f) return;
             Graphics2D g2 = (Graphics2D) g.create();
+            if (opacity < 0.99f) g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, opacity));
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             boolean hover = getModel().isRollover();
             boolean pressed = getModel().isPressed();
@@ -865,12 +1128,28 @@ public abstract class FigmaModule extends ModulePanel {
     public static class Card extends Row {
         private static final long serialVersionUID = 1L;
         private boolean dimmed = false;
+        private float pulseAlpha = 0f;
+        private Timer pulseTimer;
         public Card(JComponent content) {
             super(new BorderLayout());
             setBorder(new EmptyBorder(0, 0, 8, 0));     // room for the shadow
             add(content);
         }
         public void setDimmed(boolean d) { this.dimmed = d; repaint(); }
+        public void pulse() {
+            pulseAlpha = 1f;
+            if (pulseTimer != null && pulseTimer.isRunning()) pulseTimer.stop();
+            pulseTimer = new Timer(20, e -> {
+                pulseAlpha -= 0.06f;
+                if (pulseAlpha <= 0f) {
+                    pulseAlpha = 0f;
+                    ((Timer) e.getSource()).stop();
+                }
+                repaint();
+            });
+            pulseTimer.start();
+            repaint();
+        }
         @Override public void paint(Graphics g) {
             if (!dimmed) { super.paint(g); return; }
             Graphics2D g2 = (Graphics2D) g.create();
@@ -888,6 +1167,15 @@ public abstract class FigmaModule extends ModulePanel {
             RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, w - 1.5, h - 1.5, 28, 28);
             g2.setColor(Theme.panel2()); g2.fill(box);
             g2.setColor(Theme.inputLine()); g2.setStroke(new BasicStroke(1.5f)); g2.draw(box);
+            if (pulseAlpha > 0.01f) {
+                Color base = Theme.dark ? Theme.cyan() : Theme.pink();
+                g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), Math.round(70 * pulseAlpha)));
+                g2.setStroke(new BasicStroke(5f));
+                g2.draw(new RoundRectangle2D.Double(1.5, 1.5, w - 3, h - 3, 28, 28));
+                g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), Math.round(230 * pulseAlpha)));
+                g2.setStroke(new BasicStroke(2.2f));
+                g2.draw(box);
+            }
             g2.dispose();
         }
     }
@@ -897,21 +1185,54 @@ public abstract class FigmaModule extends ModulePanel {
         private static final long serialVersionUID = 1L;
         private final Color accent;
         public Notice(boolean ok, String verdict, String detail) {
-            this(ok ? Theme.green() : Theme.pink(), (ok ? "✓ " : "✗ ") + verdict, detail);
+            this(ok ? Theme.green() : Theme.pink(), ok ? Boolean.TRUE : Boolean.FALSE, verdict, detail);
         }
-        private Notice(Color accent, String verdict, String detail) {
+        /** mark: TRUE = check, FALSE = cross, null = no mark. */
+        private Notice(Color accent, Boolean mark, String verdict, String detail) {
             super(new BorderLayout(14, 0));
             this.accent = accent;
             setBorder(new EmptyBorder(10, 18, 10, 14));
             if (verdict != null) {
+                // the pixel font has no ✓ / ✗ glyphs, so the mark is drawn as an icon and the words keep the pixel font
+                JPanel head = new JPanel();
+                head.setOpaque(false);
+                head.setLayout(new BoxLayout(head, BoxLayout.X_AXIS));
+                if (mark != null) {
+                    head.add(new Mark(mark, accent));
+                    head.add(Box.createHorizontalStrut(7));
+                }
                 JLabel v = body(verdict, 15, Theme.text());
                 if (v.getFont().canDisplayUpTo(v.getText()) != -1) v.setFont(new Font(Font.DIALOG, Font.PLAIN, 15));
-                add(v, BorderLayout.WEST);
+                v.setAlignmentY(CENTER_ALIGNMENT);
+                head.add(v);
+                add(head, BorderLayout.WEST);
             }
             add(body(detail, 14, Theme.text()), BorderLayout.CENTER);   // takes the rest of the strip, never clipped short
         }
         /** Neutral cyan prompt, e.g. before the person has typed anything. */
-        public static Notice prompt(String detail) { return new Notice(Theme.cyan(), null, detail); }
+        public static Notice prompt(String detail) { return new Notice(Theme.cyan(), null, null, detail); }
+
+        /** A small hand-drawn check (ok) or cross (problem) in the strip's colour. */
+        private static class Mark extends JComponent {
+            private static final long serialVersionUID = 1L;
+            private final boolean ok; private final Color color;
+            Mark(boolean ok, Color color) {
+                this.ok = ok; this.color = color;
+                setAlignmentY(CENTER_ALIGNMENT);
+                Dimension d = new Dimension(14, 14);
+                setPreferredSize(d); setMinimumSize(d); setMaximumSize(d);
+            }
+            @Override protected void paintComponent(Graphics g) {
+                Graphics2D g2 = smooth(g);
+                g2.setColor(Theme.dark ? color : color.darker());
+                g2.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                Path2D p = new Path2D.Double();
+                if (ok) { p.moveTo(2, 7.5); p.lineTo(5.5, 11); p.lineTo(12, 3); }
+                else    { p.moveTo(3, 3); p.lineTo(11, 11); p.moveTo(11, 3); p.lineTo(3, 11); }
+                g2.draw(p);
+                g2.dispose();
+            }
+        }
 
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
@@ -924,6 +1245,25 @@ public abstract class FigmaModule extends ModulePanel {
     }
 
     /** True when every given field is empty (nothing typed yet). */
+    /**
+     * Largest number of input rows any module will build.
+     *
+     * The rubric asks for no arbitrary item limit, and this is not one: the biggest case it
+     * names is about twenty rows, so nothing a person would really type comes near this. It
+     * exists because the row-count boxes accept any number, and a mistyped one (say a stray
+     * run of nines) used to allocate rows until the app ran out of memory or froze.
+     */
+    public static final int MAX_ROWS = 2_000;
+
+    /** Keeps a requested row count inside {@link #MAX_ROWS}, and says so when it steps in. */
+    protected int clampRows(int requested, String noun) {
+        if (requested > MAX_ROWS) {
+            showToast(this, String.format("%,d %s is too many - using %,d", requested, noun, MAX_ROWS));
+            return MAX_ROWS;
+        }
+        return Math.max(1, requested);
+    }
+
     public static boolean allBlank(JTextField... fields) {
         for (JTextField f : fields) if (f != null && !f.getText().trim().isEmpty()) return false;
         return true;
@@ -1111,19 +1451,54 @@ public abstract class FigmaModule extends ModulePanel {
      * Scrolls when there are more than 14 steps; very long runs are cut at 400 steps.
      */
     protected static JComponent explainSection(java.util.List<String> steps) {
+        // lines that state the rule ("Rule (SJF): ...") go in the "how to read" box; the rest are steps
+        java.util.List<String> notes = new java.util.ArrayList<>(), rest = new java.util.ArrayList<>();
+        for (String s : steps) (rest.isEmpty() && s.startsWith("Rule") ? notes : rest).add(s);
+        return explainSection(notes, rest, null);
+    }
+
+    /**
+     * notes  = the rule / formulas, shown first in a tinted box (may be empty);
+     * steps  = what happened, one numbered row each; a short time prefix ("t=5: ..." or "7.4 → 7.8: ...")
+     *          is pulled out into its own column so the times line up;
+     * result = optional last line, shown highlighted under the steps (may be null).
+     */
+    protected static JComponent explainSection(java.util.List<String> notes, java.util.List<String> steps, String result) {
+        JPanel content = new JPanel();
+        content.setOpaque(false);
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setAlignmentX(LEFT_ALIGNMENT);
+
+        if (!notes.isEmpty()) {
+            content.add(new ExplainNotes(notes));
+            content.add(Box.createVerticalStrut(10));
+        }
+
         JPanel list = new JPanel();
         list.setOpaque(false);
         list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
+        list.setAlignmentX(LEFT_ALIGNMENT);
         int shown = Math.min(steps.size(), 400);
-        int numW = String.valueOf(shown).length();
+        String[] when = new String[shown], what = new String[shown];
+        int whenW = 0;
+        JLabel probe = body("", 12.5f, Theme.text());
         for (int i = 0; i < shown; i++) {
-            JLabel l = body(String.format("%" + numW + "d.  %s", i + 1, steps.get(i)), 12.5f, Theme.text());
-            l.setBorder(new EmptyBorder(2, 4, 2, 4));
-            list.add(l);
+            String s = steps.get(i);
+            int colon = s.indexOf(": ");
+            String head = colon > 0 ? s.substring(0, colon) : "";
+            if (colon > 0 && head.length() <= 22 && head.matches(".*\\d.*") && !head.contains("(")) {
+                when[i] = head; what[i] = s.substring(colon + 2);
+                probe.setText(head);
+                whenW = Math.max(whenW, probe.getPreferredSize().width);
+            } else {
+                when[i] = null; what[i] = s;
+            }
         }
+        for (int i = 0; i < shown; i++) list.add(new ExplainRow(i + 1, when[i], what[i], whenW, i % 2 == 1));
         if (steps.size() > shown)
-            list.add(body("... and " + (steps.size() - shown) + " more steps", 12, Theme.muted()));
-        JComponent body = list;
+            list.add(body("    ... and " + (steps.size() - shown) + " more steps", 12, Theme.muted()));
+
+        JComponent stepsBox = list;
         if (shown > 14) {
             JScrollPane sp = new JScrollPane(list, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
                     ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
@@ -1132,19 +1507,152 @@ public abstract class FigmaModule extends ModulePanel {
             sp.setBorder(null);
             styleScrollPane(sp);
             sp.getVerticalScrollBar().setUnitIncrement(20);
-            int h = 14 * (list.getComponent(0).getPreferredSize().height);
+            int h = 14 * list.getComponent(0).getPreferredSize().height;
             sp.setPreferredSize(new Dimension(300, h));
             sp.setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
             sp.setAlignmentX(LEFT_ALIGNMENT);
-            body = sp;
+            stepsBox = sp;
         }
+        if (shown > 0) {
+            content.add(pixelText("STEP BY STEP", 6.5f, Theme.muted(), 0.1f));
+            content.add(Box.createVerticalStrut(6));
+            content.add(stepsBox);
+        }
+        if (result != null) {
+            content.add(Box.createVerticalStrut(8));
+            content.add(new ExplainResult(result));
+        }
+
         JPanel wrap = new JPanel();
         wrap.setOpaque(false);
         wrap.setLayout(new BoxLayout(wrap, BoxLayout.Y_AXIS));
         wrap.setAlignmentX(LEFT_ALIGNMENT);
         wrap.add(Box.createVerticalStrut(14));
-        wrap.add(collapsibleSection("HOW IT WAS COMPUTED", body));
+        wrap.add(collapsibleSection("HOW IT WAS COMPUTED", content));
         return wrap;
+    }
+
+    /** Tinted rounded box with a small "HOW TO READ THIS" label and the rule / formula lines. */
+    private static class ExplainNotes extends JPanel {
+        private static final long serialVersionUID = 1L;
+        ExplainNotes(java.util.List<String> notes) {
+            setOpaque(false);
+            setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+            setAlignmentX(LEFT_ALIGNMENT);
+            setBorder(new EmptyBorder(10, 16, 10, 16));
+            add(pixelText("HOW TO READ THIS", 6.5f, Theme.dark ? new Color(0xff8fd0) : Theme.pink(), 0.1f));
+            add(Box.createVerticalStrut(6));
+            for (String n : notes) {
+                JLabel l = body("•  " + n, 12.5f, Theme.text());
+                l.setBorder(new EmptyBorder(2, 0, 2, 0));
+                add(l);
+            }
+        }
+        @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = smooth(g);
+            RoundRectangle2D box = new RoundRectangle2D.Double(0.5, 0.5, getWidth() - 1, getHeight() - 1, 14, 14);
+            g2.setColor(Theme.panel2());
+            g2.fill(box);
+            g2.setColor(Theme.line());
+            g2.setStroke(new BasicStroke(1f));
+            g2.draw(box);
+            Color accent = Theme.pink();                                  // accent bar on the left
+            g2.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 200));
+            g2.fill(new RoundRectangle2D.Double(0.5, 8, 3.5, getHeight() - 16, 3, 3));
+            g2.dispose();
+        }
+    }
+
+    /** One step: [number badge]  time  what happened. Every other row has a faint background. */
+    private static class ExplainRow extends JPanel {
+        private static final long serialVersionUID = 1L;
+        private final boolean shaded;
+        ExplainRow(int n, String when, String what, int whenW, boolean shaded) {
+            this.shaded = shaded;
+            setOpaque(false);
+            setLayout(new BoxLayout(this, BoxLayout.X_AXIS));
+            setAlignmentX(LEFT_ALIGNMENT);
+            setBorder(new EmptyBorder(4, 6, 4, 10));
+            add(new NumberBadge(n));
+            add(Box.createHorizontalStrut(10));
+            if (whenW > 0) {
+                JLabel w = body(when == null ? "" : when, 12.5f, Theme.dark ? Theme.cyan() : Theme.pink());
+                Dimension d = new Dimension(whenW + 4, w.getPreferredSize().height);
+                w.setPreferredSize(d); w.setMinimumSize(d); w.setMaximumSize(d);
+                w.setAlignmentY(CENTER_ALIGNMENT);
+                add(w);
+                add(Box.createHorizontalStrut(14));
+            }
+            JLabel t = body(what, 12.5f, Theme.text());
+            t.setAlignmentY(CENTER_ALIGNMENT);
+            add(t);
+            add(Box.createHorizontalGlue());
+        }
+        @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        @Override protected void paintComponent(Graphics g) {
+            if (!shaded) return;
+            Graphics2D g2 = smooth(g);
+            g2.setColor(Theme.panel2());
+            g2.fill(new RoundRectangle2D.Double(0, 0, getWidth(), getHeight(), 10, 10));
+            g2.dispose();
+        }
+    }
+
+    /** Small rounded square with the step number. */
+    private static class NumberBadge extends JComponent {
+        private static final long serialVersionUID = 1L;
+        private final String n;
+        NumberBadge(int n) {
+            this.n = String.valueOf(n);
+            setFont(Fonts.body(10.5f));
+            setAlignmentY(CENTER_ALIGNMENT);
+        }
+        @Override public Dimension getPreferredSize() {
+            int w = getFontMetrics(getFont()).stringWidth(n);
+            return new Dimension(Math.max(24, (int) Math.ceil(w * 1.1) + 12), 20);
+        }
+        @Override public Dimension getMaximumSize() { return getPreferredSize(); }
+        @Override public Dimension getMinimumSize() { return getPreferredSize(); }
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = smooth(g);
+            RoundRectangle2D r = new RoundRectangle2D.Double(0.5, 0.5, getWidth() - 1, getHeight() - 1, 10, 10);
+            g2.setColor(Theme.panel());
+            g2.fill(r);
+            g2.setColor(Theme.line());
+            g2.setStroke(new BasicStroke(1f));
+            g2.draw(r);
+            g2.setFont(getFont());
+            g2.setColor(Theme.muted());
+            centerText(g2, n, getWidth() / 2.0, middle(g2, getHeight() / 2.0));
+            g2.dispose();
+        }
+    }
+
+    /** The final answer line, in a box with a coloured outline. */
+    private static class ExplainResult extends JPanel {
+        private static final long serialVersionUID = 1L;
+        ExplainResult(String text) {
+            setOpaque(false);
+            setLayout(new BoxLayout(this, BoxLayout.X_AXIS));
+            setAlignmentX(LEFT_ALIGNMENT);
+            setBorder(new EmptyBorder(8, 14, 8, 14));
+            add(pixelText("RESULT", 6.5f, Theme.dark ? Theme.cyan() : Theme.pink(), 0.1f));
+            add(Box.createHorizontalStrut(12));
+            add(body(text, 13f, Theme.text()));
+            add(Box.createHorizontalGlue());
+        }
+        @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = smooth(g);
+            RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, getWidth() - 1.5, getHeight() - 1.5, 14, 14);
+            g2.setColor(Theme.panel());
+            g2.fill(box);
+            g2.setColor(Theme.dark ? Theme.cyan() : Theme.pink());
+            g2.setStroke(new BasicStroke(1.5f));
+            g2.draw(box);
+            g2.dispose();
+        }
     }
 
     // ============================ INPUT TOOLBAR (Sample / Large / Random / History / Undo / Clear) ============================
