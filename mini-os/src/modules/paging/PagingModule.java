@@ -200,6 +200,7 @@ public class PagingModule extends FigmaModule {
     }
 
     private void resizePages(int n) {
+        n = clampRows(n, "pages");
         history.push(snapshot());
         frames.resize(n);
         rebuildInputs();

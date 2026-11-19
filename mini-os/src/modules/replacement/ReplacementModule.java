@@ -26,6 +26,9 @@ import shared.Theme;
 public class ReplacementModule extends FigmaModule {
     private static final long serialVersionUID = 1L;
     static final String[] ALGOS = {"FIFO", "LRU", "Optimal"};
+
+    /** Upper bound for the frame count; a real page table never comes close. */
+    static final int MAX_FRAMES = 1_000;
     private static final String SAMPLE_REF = "7 0 1 2 0 3 0 4 2 3 0 3 2";
     private static final String SAMPLE_FRAMES = "3";
     private static final String LARGE_REF = "7 0 1 2 0 3 0 4 2 3 0 3 2 1 2 0 1 7 0 1 4 5 2 3 0";
@@ -247,15 +250,19 @@ public class ReplacementModule extends FigmaModule {
             try {
                 numFrames = Integer.parseInt(ft);
                 if (numFrames < 1) problems.add("the frame count is " + numFrames + " - it must be 1 or more");
+                // The frame grid is a numFrames x steps array, so an unbounded count used to
+                // allocate until the app ran out of memory. Far above any real page table.
+                else if (numFrames > MAX_FRAMES)
+                    problems.add(String.format("the frame count is %,d - keep it at %,d or less", numFrames, MAX_FRAMES));
             } catch (NumberFormatException e) { problems.add("the frame count (\"" + ft + "\") is not a whole number"); }
         }
-        if (ft.isEmpty() || numFrames < 1) frames.setInvalid(true);
+        if (ft.isEmpty() || numFrames < 1 || numFrames > MAX_FRAMES) frames.setInvalid(true);
 
         if (!problems.isEmpty()) {
             r.add(new Notice(false, "Input check", problems.get(0)));
             for (int i = 1; i < problems.size(); i++) { r.add(Box.createVerticalStrut(6)); r.add(new Notice(false, "Also", problems.get(i))); }
             r.add(Box.createVerticalStrut(6));
-            r.add(body("Rule: at least one page reference (0 or more), and a frame count of 1 or more.", 12, Theme.muted()));
+            r.add(body(String.format("Rule: at least one page reference (0 or more), and a frame count from 1 to %,d.", MAX_FRAMES), 12, Theme.muted()));
             return;
         }
 

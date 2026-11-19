@@ -93,6 +93,7 @@ public class SegmentationModule extends FigmaModule {
 
     /** +1 / +5 / −1 / Set: changes the number of segments, keeping what was typed (with Undo). */
     private void resizeSegments(int n) {
+        n = clampRows(n, "segments");
         history.push(snapshot());
         grid.resize(n);
         rebuildInputs();

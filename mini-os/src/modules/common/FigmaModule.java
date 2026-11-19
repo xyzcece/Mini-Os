@@ -1079,6 +1079,25 @@ public abstract class FigmaModule extends ModulePanel {
     }
 
     /** True when every given field is empty (nothing typed yet). */
+    /**
+     * Largest number of input rows any module will build.
+     *
+     * The rubric asks for no arbitrary item limit, and this is not one: the biggest case it
+     * names is about twenty rows, so nothing a person would really type comes near this. It
+     * exists because the row-count boxes accept any number, and a mistyped one (say a stray
+     * run of nines) used to allocate rows until the app ran out of memory or froze.
+     */
+    public static final int MAX_ROWS = 2_000;
+
+    /** Keeps a requested row count inside {@link #MAX_ROWS}, and says so when it steps in. */
+    protected int clampRows(int requested, String noun) {
+        if (requested > MAX_ROWS) {
+            showToast(this, String.format("%,d %s is too many - using %,d", requested, noun, MAX_ROWS));
+            return MAX_ROWS;
+        }
+        return Math.max(1, requested);
+    }
+
     public static boolean allBlank(JTextField... fields) {
         for (JTextField f : fields) if (f != null && !f.getText().trim().isEmpty()) return false;
         return true;

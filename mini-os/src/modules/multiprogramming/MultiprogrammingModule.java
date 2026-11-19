@@ -466,7 +466,7 @@ public class MultiprogrammingModule extends FigmaModule {
 
     private void resizeJobs(int targetCount) {
         pushUndo();
-        int clamped = Math.max(1, targetCount);
+        int clamped = clampRows(targetCount, "jobs");
         while (jobs.size() < clamped) jobs.add(new String[]{"", ""});
         while (jobs.size() > clamped) jobs.remove(jobs.size() - 1);
         hasRun = false;

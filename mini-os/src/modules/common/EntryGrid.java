@@ -94,7 +94,8 @@ public class EntryGrid {
     /** Grows or shrinks to n entries (at least 1), keeping what was typed. */
     public void resize(int n) {
         save();
-        n = Math.max(1, n);
+        // Lower AND upper bound: an unbounded count used to allocate rows until the app died.
+        n = Math.min(FigmaModule.MAX_ROWS, Math.max(1, n));
         while (rows.size() < n) rows.add(new String[cols.length]);
         for (String[] r : rows) for (int c = 0; c < r.length; c++) if (r[c] == null) r[c] = "";
         while (rows.size() > n) rows.remove(rows.size() - 1);

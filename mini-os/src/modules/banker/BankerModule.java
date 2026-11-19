@@ -428,9 +428,24 @@ public class BankerModule extends FigmaModule {
     }
 
     /** Grows or shrinks the grids, keeping everything the person already typed. */
+    /**
+     * Biggest grid this page will build. Unlike the list-style modules it lays out one input
+     * box per cell, so the product of the two counts is what matters, not either on its own:
+     * 400 x 30 is about a second to build, so the cell budget is set near that.
+     */
+    private static final int MAX_RESOURCES = 100, MAX_CELLS = 20_000;
+
     private void resize(int newProcs, int newRes, String toastMsg) {
         if (newProcs < 1 || newRes < 1)
             return;
+        int p = Math.min(MAX_ROWS, newProcs), r = Math.min(MAX_RESOURCES, newRes);
+        if ((long) p * r > MAX_CELLS)
+            p = Math.max(1, MAX_CELLS / r);
+        if (p != newProcs || r != newRes) {
+            toastMsg = String.format("%,d × %,d is too big - using %,d × %,d", newProcs, newRes, p, r);
+            newProcs = p;
+            newRes = r;
+        }
         saveFields();
         pushUndo();
         String[] av = blankRow(newRes);
@@ -583,7 +598,7 @@ public class BankerModule extends FigmaModule {
                         allocF[i][j].setInvalid(true);
                         maxF[i][j].setInvalid(true);
                         problems.add(String.format("P%d holds %d of R%d but its Maximum is only %d - "
-                                + "Allocation can never be more than Maximum.", i + 1, alloc[i][j], j + 1, max[i][j]));
+                                + "Allocation can never be more than Maximum", i + 1, alloc[i][j], j + 1, max[i][j]));
                     }
         }
         if (!problems.isEmpty()) {
@@ -598,6 +613,9 @@ public class BankerModule extends FigmaModule {
                 r.add(Box.createVerticalStrut(6));
                 r.add(body("... and " + (problems.size() - 4) + " more cell(s) to fix.", 12, Theme.muted()));
             }
+            r.add(Box.createVerticalStrut(6));
+            r.add(body("Rule: every cell is a whole number of 0 or more, and no Allocation is "
+                    + "bigger than its Maximum.", 12, Theme.muted()));
             return;
         }
 
@@ -772,13 +790,13 @@ public class BankerModule extends FigmaModule {
     private static String why(String raw) {
         String t = raw == null ? "" : raw.trim();
         if (t.isEmpty())
-            return "is blank - type a whole number of 0 or more.";
+            return "is blank - type a whole number of 0 or more";
         if (t.startsWith("-"))
-            return "cannot be negative - type a whole number of 0 or more.";
+            return "cannot be negative - type a whole number of 0 or more";
         for (int i = 0; i < t.length(); i++)
             if (!Character.isDigit(t.charAt(i)))
-                return "must be a whole number - \"" + t + "\" is not.";
-        return String.format("is too big - keep each value at %,d or less.", MAX_UNITS);
+                return "must be a whole number - \"" + t + "\" is not";
+        return String.format("is too big - keep each value at %,d or less", MAX_UNITS);
     }
 
     // ============================ THE ALGORITHM ============================

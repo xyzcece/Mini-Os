@@ -177,6 +177,7 @@ public class CpuModule extends FigmaModule {
 
     /** +1 / +5 / −1 / Set: changes the number of jobs, keeping what was typed (with Undo). */
     private void resizeJobs(int n) {
+        n = clampRows(n, "jobs");
         history.push(snapshot());
         grid.resize(n);
         rebuildInputs();

@@ -373,6 +373,9 @@ public class FragmentationModule extends FigmaModule {
                 r.add(Box.createVerticalStrut(6));
                 r.add(new Notice(false, "Also", procErr));
             }
+            r.add(Box.createVerticalStrut(6));
+            r.add(body(String.format("Rule: every block and process size is a whole number from 1 to %,d KB, "
+                    + "separated by spaces or commas.", MAX_SIZE), 12, Theme.muted()));
             return;
         }
 
@@ -574,7 +577,7 @@ public class FragmentationModule extends FigmaModule {
     static int[] parseSizes(String raw, String what) {
         String trimmed = raw == null ? "" : raw.trim();
         if (trimmed.isEmpty())
-            throw new IllegalArgumentException("type at least one " + what + " size.");
+            throw new IllegalArgumentException("type at least one " + what + " size");
         String[] parts = trimmed.split("[\\s,]+");
         List<Integer> out = new ArrayList<>();
         int pos = 0;
@@ -585,17 +588,17 @@ public class FragmentationModule extends FigmaModule {
             try {
                 v = Long.parseLong(p);
             } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(what + " #" + pos + " (\"" + p + "\") is not a whole number.");
+                throw new IllegalArgumentException(what + " " + pos + " (\"" + p + "\") is not a whole number");
             }
             if (v <= 0)
-                throw new IllegalArgumentException(what + " #" + pos + " (\"" + p + "\") must be more than 0.");
+                throw new IllegalArgumentException(what + " " + pos + " (\"" + p + "\") must be more than 0");
             if (v > MAX_SIZE)
                 throw new IllegalArgumentException(String.format(
-                        "%s #%d (\"%s\") is too big - keep each %s size at %,d KB or less.", what, pos, p, what, MAX_SIZE));
+                        "%s %d (\"%s\") is too big - keep each %s size at %,d KB or less", what, pos, p, what, MAX_SIZE));
             out.add((int) v);
         }
         if (out.isEmpty())
-            throw new IllegalArgumentException("type at least one " + what + " size.");
+            throw new IllegalArgumentException("type at least one " + what + " size");
         int[] arr = new int[out.size()];
         for (int i = 0; i < arr.length; i++) arr[i] = out.get(i);
         return arr;
