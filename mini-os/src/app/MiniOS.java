@@ -495,37 +495,27 @@ public class MiniOS extends JFrame {
     /** Builds an on-theme rounded Hyperpuff OS window frame with a glossy pink title bar and close button. */
     private JPanel buildOsDialogFrame(JDialog dlg, String barTitle, JComponent body, JComponent footer) {
         dlg.setUndecorated(true);
-        dlg.setBackground(new Color(0, 0, 0, 0));
 
-        final int arc = 18, pad = 6, barH = 38;
+        final int arc = 18, barH = 38;
         JPanel outer = new JPanel(new BorderLayout()) {
             @Override protected void paintComponent(Graphics g0) {
                 Graphics2D g = (Graphics2D) g0.create();
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                int w = getWidth() - pad * 2, h = getHeight() - pad * 2;
-                // Soft drop shadow
-                for (int i = 1; i <= 4; i++) {
-                    g.setColor(Theme.dark ? new Color(0, 0, 0, 32) : new Color(184, 74, 140, 18));
-                    g.fill(new java.awt.geom.RoundRectangle2D.Double(pad - i * 0.5, pad + i, w + i, h + i * 0.5, arc + i, arc + i));
-                }
-                Shape clip = new java.awt.geom.RoundRectangle2D.Double(pad, pad, w, h, arc, arc);
-                g.setClip(clip);
-                g.setPaint(new GradientPaint(0, pad, Theme.bg(), 0, pad + h, Theme.panel2()));
-                g.fill(clip);
+                int w = getWidth(), h = getHeight();
+                g.setPaint(new GradientPaint(0, 0, Theme.bg(), 0, h, Theme.panel2()));
+                g.fillRect(0, 0, w, h);
                 // Glossy pink OS title bar
-                g.setPaint(new GradientPaint(0, pad, Theme.barTop(), 0, pad + barH, Theme.barBottom()));
-                g.fillRect(pad, pad, w, barH);
+                g.setPaint(new GradientPaint(0, 0, Theme.barTop(), 0, barH, Theme.barBottom()));
+                g.fillRect(0, 0, w, barH);
                 g.setColor(new Color(255, 255, 255, 75));
-                g.fillRect(pad, pad, w, barH / 3);
-                g.setClip(null);
+                g.fillRect(0, 0, w, barH / 3);
                 g.setColor(Theme.pink());
                 g.setStroke(new BasicStroke(2f));
-                g.draw(new java.awt.geom.RoundRectangle2D.Double(pad + 0.5, pad + 0.5, w - 1, h - 1, arc, arc));
+                g.draw(new java.awt.geom.RoundRectangle2D.Double(1, 1, w - 2, h - 2, arc, arc));
                 g.dispose();
             }
         };
-        outer.setOpaque(false);
-        outer.setBorder(new EmptyBorder(pad, pad, pad, pad));
+        outer.setOpaque(true);
 
         // Draggable title bar
         JPanel bar = new JPanel(new BorderLayout(8, 0));
@@ -680,6 +670,7 @@ public class MiniOS extends JFrame {
 
         dlg.setContentPane(buildOsDialogFrame(dlg, "Confirm Exit — Hyperpuff", body, footer));
         dlg.pack();
+        try { dlg.setShape(new java.awt.geom.RoundRectangle2D.Double(0, 0, dlg.getWidth(), dlg.getHeight(), 18, 18)); } catch (Exception ignored) {}
         dlg.setLocationRelativeTo(this);
         dlg.setVisible(true);
         return confirmed[0];
@@ -828,6 +819,7 @@ public class MiniOS extends JFrame {
                 JComponent.WHEN_IN_FOCUSED_WINDOW);
         dlg.setContentPane(buildOsDialogFrame(dlg, "Hyperpuff — Quick Help & Formulas", sp, footer));
         dlg.pack();
+        try { dlg.setShape(new java.awt.geom.RoundRectangle2D.Double(0, 0, dlg.getWidth(), dlg.getHeight(), 18, 18)); } catch (Exception ignored) {}
         dlg.setLocationRelativeTo(this);
         dlg.setVisible(true);
     }
