@@ -459,10 +459,8 @@ public class MultiprogrammingModule extends FigmaModule {
         foot1.add(pasteBtn);
         b.add(foot1);
 
-        b.add(Box.createVerticalStrut(4));
-        JPanel foot2 = hRow();
-        foot2.add(body("Click cell to type · Enter/Tab next · Ctrl+C/V Excel · × to remove", 11, Theme.muted()));
-        b.add(foot2);
+        b.add(Box.createVerticalStrut(10));
+        b.add(shortcutHints("AT = arrival time  ·  BT = burst time", true));
         return b;
     }
 
@@ -806,7 +804,8 @@ public class MultiprogrammingModule extends FigmaModule {
             };
         }
         r.add(collapsibleSection("JOB COMPLETION SUMMARY", cappedScroll(new JobSummaryTable(summary), 320)));
-        r.add(explainSection(explain(res, p, startMin, clockMode)));
+        r.add(explainSection(explainNotes(p), explain(res, p, startMin, clockMode),
+                "Last job done at " + formatTime(res.endTime, clockMode)));
 
         r.add(Box.createVerticalStrut(10));
         StringBuilder sbCopy = new StringBuilder();
@@ -1051,22 +1050,41 @@ public class MultiprogrammingModule extends FigmaModule {
         double endTime;
     }
 
-    /** One line per event: how many jobs share the CPU, the share each gets, and the work done. */
+    /** The "how to read" lines: what %CPU/J, ET and HW/J mean. */
+    static List<String> explainNotes(double p) {
+        List<String> out = new ArrayList<>();
+        out.add(String.format("CPU share per job:  %%CPU/J = (1 − p^n) ÷ n,  where n = jobs in memory and p = I/O wait = %.0f%%%s.",
+                p * 100, p == 0 ? "  (so with p = 0, %CPU/J = 1 ÷ n)" : ""));
+        out.add("Work done in an interval:  HW/J = ET × %CPU/J,  where ET = elapsed time since the last event.");
+        out.add("A job finishes when the work it has received adds up to its BT (burst time).");
+        return out;
+    }
+
+    /** One line per event: how many jobs share the CPU, the share each gets, the work done, and what happened. */
     static List<String> explain(Result res, double p, double startMin, boolean clockMode) {
         List<String> out = new ArrayList<>();
-        out.add(String.format("With I/O wait p = %.0f%%, n jobs keep the CPU busy 1 − p^n of the time, so each job gets "
-                + "%%CPU/J = (1 − p^n) ÷ n%s.", p * 100, p == 0 ? " (= 1 ÷ n when p = 0)" : ""));
-        out.add("Between two events: ET = elapsed time, HW/J = ET × %CPU/J = work each job gets done; a job ends when its BT is used up.");
         double prev = startMin;
         for (EventRow row : res.rows) {
-            if (row.nj == 0) { out.add(formatTime(row.time, clockMode) + ": " + row.event + " (arrives)."); prev = row.time; continue; }
-            out.add(String.format("%s → %s: %d job%s share the CPU → %%CPU/J = %s, ET = %s, HW/J = %s × %s = %s; %s.",
+            if (row.nj == 0) { out.add(formatTime(row.time, clockMode) + ": " + eventInWords(row.event) + "."); prev = row.time; continue; }
+            out.add(String.format("%s → %s: %d job%s running  ·  %%CPU/J = %s  ·  ET = %s  ·  HW/J = %s × %s = %s   →   %s.",
                     formatTime(prev, clockMode), formatTime(row.time, clockMode), row.nj, row.nj == 1 ? "" : "s",
-                    fmtRate(row.rate), fmtRate(row.et), fmtRate(row.et), fmtRate(row.rate), fmtRate(row.hw), row.event));
+                    fmtRate(row.rate), fmtRate(row.et), fmtRate(row.et), fmtRate(row.rate), fmtRate(row.hw),
+                    eventInWords(row.event)));
             prev = row.time;
         }
-        out.add("Last job done at " + formatTime(res.endTime, clockMode) + ".");
         return out;
+    }
+
+    /** "J1, J2 t · J3 a/s" (the table's short form) → "J1, J2 finish, J3 arrives and starts". */
+    static String eventInWords(String ev) {
+        List<String> parts = new ArrayList<>();
+        for (String part : ev.split(" · ")) {
+            boolean many = part.contains(",");
+            if (part.endsWith(" a/s")) parts.add(part.substring(0, part.length() - 4) + (many ? " arrive and start" : " arrives and starts"));
+            else if (part.endsWith(" t")) parts.add(part.substring(0, part.length() - 2) + (many ? " finish" : " finishes"));
+            else parts.add(part);
+        }
+        return String.join(", ", parts);
     }
 
     static Result simulate(List<Job> inputJobs, double p, double startMin) {
