@@ -1,11 +1,8 @@
 package shared;
 
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
-import java.io.File;
-import java.io.IOException;
 
 /**
  * UMak pixel-art desktop (the jeepney is part of the wallpaper art).
@@ -194,11 +191,14 @@ public class AnimatedBackground extends JPanel {
                 g2.setStroke(new BasicStroke(Math.max(1.5f, (float) (2.5 * s))));
                 g2.drawLine(sx, sy, sx + (int) Math.round(26 * s), sy - (int) Math.round(9 * s));
             }
+            drawCelestial(g2, x0, s, true);
+            drawNightCampusLights(g2, x0, s);
             if (nightJeeps != null) {
-                drawJeep(g2, nightJeeps[jeepVar], x0, s, jeepX, 952, 0.0);
+                drawJeep(g2, nightJeeps[jeepVar], x0, s, jeepX, 952, 0.0, true);
             }
             drawTricycle(g2, x0, s, trikeX, 950, true);
         } else {
+            drawCelestial(g2, x0, s, false);
             g2.setColor(new Color(255, 255, 255, 115));
             for (int i = 0; i < 3; i++) {
                 double cx = ((tick * (10 + i * 4) + i * 430) % (getWidth() + 180)) - 120;
@@ -218,7 +218,7 @@ public class AnimatedBackground extends JPanel {
                 g2.drawLine((int) bx, by, (int) bx + bw, by - flap);
             }
             if (dayJeeps != null) {
-                drawJeep(g2, dayJeeps[jeepVar], x0, s, jeepX, 952, 0.0);
+                drawJeep(g2, dayJeeps[jeepVar], x0, s, jeepX, 952, 0.0, false);
             }
             drawTricycle(g2, x0, s, trikeX, 950, false);
         }
@@ -227,6 +227,15 @@ public class AnimatedBackground extends JPanel {
         if (rainy) {
             g2.setColor(Theme.dark ? new Color(10, 16, 38, 60) : new Color(40, 60, 95, 65));
             g2.fillRect(0, 0, getWidth(), h);
+            if (Theme.dark) {
+                double lp = (tick * 0.14) % 14.0;
+                int flashA = (lp < 0.16) ? 44 : (lp > 0.26 && lp < 0.36) ? 28 : 0;
+                if (flashA > 0) {
+                    g2.setPaint(new GradientPaint(0, 0, new Color(215, 232, 255, flashA),
+                            0, (int) (h * 0.65), new Color(215, 232, 255, 0)));
+                    g2.fillRect(0, 0, getWidth(), (int) (h * 0.65));
+                }
+            }
             g2.setColor(new Color(205, 232, 255, Theme.dark ? 130 : 165));
             g2.setStroke(new BasicStroke(Math.max(1.2f, (float) (1.6 * s))));
             for (int i = 0; i < 65; i++) {
@@ -240,7 +249,7 @@ public class AnimatedBackground extends JPanel {
             int roadRange = Math.max(12, h - roadTop - 6);
             for (int i = 0; i < 14; i++) {
                 double phase = (tick * 1.8 + i * 0.41) % 1.0;
-                int sx = (int) ((i * 173 + (int) (tick * 3)) % Math.max(100, getWidth()));
+                int sx = (i * 173 + (int) (tick * 3)) % Math.max(100, getWidth());
                 int sy = roadTop + (i * 37) % roadRange;
                 int rw = Math.max(4, (int) Math.round((4 + phase * 10) * s));
                 int rh = Math.max(2, (int) Math.round((2 + phase * 3) * s));
@@ -250,6 +259,101 @@ public class AnimatedBackground extends JPanel {
             }
         }
         g2.dispose();
+    }
+
+    /** Pixel crescent moon (night) or warm pixel sun (day) tucked in the upper-right sky. */
+    private void drawCelestial(Graphics2D g2, double x0, double s, boolean night) {
+        int cx = (int) Math.round(x0 + 1110 * s);
+        int cy = (int) Math.round(92 * s);
+        int px = Math.max(3, (int) Math.round(5 * s));
+        double pulse = 0.5 + 0.5 * Math.sin(tick * 1.1);
+        if (night) {
+            int haloR = (int) Math.round((44 + pulse * 6) * s);
+            g2.setColor(new Color(255, 240, 185, (int) (20 + pulse * 14)));
+            g2.fillOval(cx - haloR, cy - haloR, haloR * 2, haloR * 2);
+            int midR = (int) Math.round(28 * s);
+            g2.setColor(new Color(255, 244, 200, 38));
+            g2.fillOval(cx - midR, cy - midR, midR * 2, midR * 2);
+            // Crisp pixel crescent moon
+            int[][] cells = {
+                    {0, -3}, {1, -3}, {-1, -2}, {0, -2}, {-2, -1}, {-1, -1},
+                    {-2, 0}, {-1, 0}, {-2, 1}, {-1, 1}, {-1, 2}, {0, 2}, {0, 3}, {1, 3}
+            };
+            g2.setColor(new Color(0xfff4c2));
+            for (int[] c : cells) {
+                g2.fillRect(cx + c[0] * px, cy + c[1] * px, px, px);
+            }
+        } else {
+            int haloR = (int) Math.round((48 + pulse * 8) * s);
+            g2.setColor(new Color(255, 226, 122, (int) (28 + pulse * 18)));
+            g2.fillOval(cx - haloR, cy - haloR, haloR * 2, haloR * 2);
+            // 8 gentle pulsing pixel sun rays
+            int rayDist = (int) Math.round((27 + pulse * 4) * s);
+            g2.setColor(new Color(255, 220, 110, 185));
+            for (int i = 0; i < 8; i++) {
+                double ang = i * Math.PI / 4.0 + tick * 0.06;
+                int rx = cx + (int) Math.round(Math.cos(ang) * rayDist) - px / 2;
+                int ry = cy + (int) Math.round(Math.sin(ang) * rayDist) - px / 2;
+                g2.fillRect(rx, ry, px, px);
+            }
+            // Warm pixel sun disc
+            int r = px * 3;
+            g2.setColor(new Color(0xffe27a));
+            g2.fillRect(cx - r, cy - r + px, r * 2, r * 2 - px * 2);
+            g2.fillRect(cx - r + px, cy - r, r * 2 - px * 2, r * 2);
+            g2.setColor(new Color(0xfff6cc));
+            g2.fillRect(cx - px, cy - px, px * 2, px * 2);
+        }
+    }
+
+    /** Nighttime streetlamp glow, breathing UMak building windows, and floating fireflies. */
+    private void drawNightCampusLights(Graphics2D g2, double x0, double s) {
+        double breathe = 0.5 + 0.5 * Math.sin(tick * 1.2);
+
+        // 1) Breathing / blinking UMak building windows
+        int[][] wins = {{382, 420}, {468, 468}, {556, 396}, {642, 492}, {748, 432}, {824, 480}};
+        int ww = Math.max(4, (int) Math.round(12 * s));
+        int wh = Math.max(5, (int) Math.round(16 * s));
+        for (int i = 0; i < wins.length; i++) {
+            double wave = Math.sin(tick * (0.45 + i * 0.11) + i * 2.1);
+            if (wave > 0.15) {
+                int a = (int) Math.round(Math.min(1.0, (wave - 0.15) * 1.4) * 115);
+                int wx = (int) Math.round(x0 + wins[i][0] * s);
+                int wy = (int) Math.round(wins[i][1] * s);
+                g2.setColor(new Color(255, 224, 130, a));
+                g2.fillRect(wx, wy, ww, wh);
+            }
+        }
+
+        // 2) Warm streetlamp halos along the UMak campus lawn
+        int[] lampX = {352, 916};
+        int lampY = (int) Math.round(654 * s);
+        for (int lxWorld : lampX) {
+            int lx = (int) Math.round(x0 + lxWorld * s);
+            int rOuter = (int) Math.round((44 + breathe * 6) * s);
+            int rMid = (int) Math.round(24 * s);
+            int rCore = Math.max(4, (int) Math.round(9 * s));
+            g2.setColor(new Color(255, 224, 130, (int) (20 + breathe * 10)));
+            g2.fillOval(lx - rOuter, lampY - rOuter, rOuter * 2, rOuter * 2);
+            g2.setColor(new Color(255, 232, 155, 42));
+            g2.fillOval(lx - rMid, lampY - rMid, rMid * 2, rMid * 2);
+            g2.setColor(new Color(255, 246, 200, 90));
+            g2.fillOval(lx - rCore, lampY - rCore, rCore * 2, rCore * 2);
+        }
+
+        // 3) Floating golden pixel fireflies over the bushes and lawn
+        int fsz = Math.max(2, (int) Math.round(3.5 * s));
+        for (int i = 0; i < 8; i++) {
+            double fxW = 240 + ((i * 123 + Math.sin(tick * 0.5 + i * 1.4) * 38) % 820);
+            double fyW = 770 + (i % 3) * 28 + Math.cos(tick * 0.8 + i * 1.9) * 14;
+            double glow = 0.5 + 0.5 * Math.sin(tick * 1.8 + i * 1.7);
+            int fx = (int) Math.round(x0 + fxW * s);
+            int fy = (int) Math.round(fyW * s);
+            g2.setColor(new Color(255, 240, 145, (int) (35 * glow)));
+            g2.fillOval(fx - fsz * 2, fy - fsz * 2, fsz * 5, fsz * 5);
+            g2.setColor(new Color(255, 248, 175, (int) (110 + 145 * glow)));
+            g2.fillRect(fx, fy, fsz, fsz);
+        }
     }
 
     /** Pixel-art Philippine tricycle driving along the lower lane (scaled to match jeepney). */
@@ -276,8 +380,21 @@ public class AnimatedBackground extends JPanel {
         g2.fillRect(tx + px * 8, ty + px * 2, px * 3, px * 3);
         g2.setColor(new Color(0x3d3150));
         g2.fillRect(tx, ty + px * 6, px * 2, px * 2);
-        // Headlight at night
+        // Headlight beam & rainy road reflection at night
         if (night) {
+            int beamLen = px * 11;
+            int hy = ty + px * 6 + px / 2;
+            Polygon cone = new Polygon(
+                    new int[]{tx, tx - beamLen, tx - beamLen},
+                    new int[]{hy, hy - px * 2, hy + px * 3},
+                    3);
+            g2.setColor(new Color(255, 238, 160, 42));
+            g2.fillPolygon(cone);
+            if (rainy) {
+                int shimmer = (int) (24 + 14 * Math.sin(tick * 3.2));
+                g2.setColor(new Color(255, 234, 155, shimmer));
+                g2.fillRect(tx - beamLen, ty + px * 10, beamLen + px * 11, Math.max(3, px / 2));
+            }
             g2.setColor(new Color(255, 240, 150));
             g2.fillRect(tx, ty + px * 6, px, px);
         }
@@ -295,12 +412,30 @@ public class AnimatedBackground extends JPanel {
         }
     }
 
-    private void drawJeep(Graphics2D g2, BufferedImage jeep, double x0, double s, double worldX, double worldY, double phase) {
+    private void drawJeep(Graphics2D g2, BufferedImage jeep, double x0, double s, double worldX, double worldY, double phase, boolean night) {
         double bob = (Math.sin(tick * 7.0 + phase) > 0.35) ? -1.5 : 0.0;
         int jx = (int) Math.round(x0 + worldX * s);
         int jy = (int) Math.round((worldY + bob) * s);
         int jw = (int) Math.round(jeep.getWidth() * s);
         int jh = (int) Math.round(jeep.getHeight() * s);
+
+        if (night) {
+            int beamLen = (int) Math.round(135 * s);
+            int frontX = jx + (int) Math.round(jw * 0.24);
+            int hy = jy + (int) Math.round(jh * 0.66);
+            Polygon cone = new Polygon(
+                    new int[]{frontX, frontX - beamLen, frontX - beamLen},
+                    new int[]{hy, hy - (int) Math.round(18 * s), hy + (int) Math.round(28 * s)},
+                    3);
+            g2.setColor(new Color(255, 238, 160, 42));
+            g2.fillPolygon(cone);
+            if (rainy) {
+                int shimmer = (int) (26 + 14 * Math.sin(tick * 2.8));
+                g2.setColor(new Color(255, 234, 155, shimmer));
+                g2.fillRect(frontX - beamLen, jy + jh - Math.max(3, (int) Math.round(4 * s)),
+                        beamLen + (int) Math.round(jw * 0.68), Math.max(3, (int) Math.round(5 * s)));
+            }
+        }
         g2.drawImage(jeep, jx, jy, jw, jh, null);
         jeepBounds.setBounds(jx, jy, jw, jh);
 
