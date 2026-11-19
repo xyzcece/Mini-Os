@@ -98,7 +98,7 @@ java -jar Hyperpuff.jar
 
 ### 8. Multiprogramming (`src/modules/multiprogramming/MultiprogrammingModule.java`)
 * **Dynamic Input**: Variable number of jobs (`AT`, `BT` in decimal or `HH:mm`), `% I/O Wait`, and `Start Time`.
-* **Formulas**: `%CPU/J = (1 - p^NJ) / NJ`, `HW/J = ET × (%CPU/J)`.
+* **Formulas**: Events `a/s` (arrive & started) / `t` (terminate), `%CPU/NJ = 1 ÷ NJ` (at 0% I/O) or `(1 - p^NJ) ÷ NJ` (with I/O wait), `ET = present time - prev time`, `HW/job = ET × (%CPU/NJ)`, `Time Left = prev Time Left - HW/job`.
 * **Outputs**: Timeline intervals, per-job completion times, CPU utilization, and system summary.
 
 ---

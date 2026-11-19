@@ -767,11 +767,13 @@ public class MiniOS extends JFrame {
                 ══════════════════════════════════════════════════════════════════════
                   8. MULTIPROGRAMMING (CPU Utilization Model)
                 ══════════════════════════════════════════════════════════════════════
-                  Purpose : Simulates multiple jobs sharing CPU time while waiting on I/O.
-                  Key Formulas (p = I/O Wait fraction, NJ = active jobs in memory, ET = interval duration):
-                    • CPU Utilization = 1 − p^NJ
-                    • %CPU per Job    = (1 − p^NJ) ÷ NJ
-                    • Work Done (HW/J)= ET × (%CPU/J)
+                  Purpose : Simulates multiple jobs sharing CPU time across arrive/terminate events.
+                  Events  : a/s = arrive and started   |   t = terminate (Time = ET + prev time)
+                  Key Formulas (NJ = active jobs in memory, p = I/O Wait fraction):
+                    • %CPU/NJ   = 1 ÷ NJ  (at 0% I/O wait)   |   (1 − p^NJ) ÷ NJ  (with I/O wait)
+                    • ET        = present time − prev time
+                    • HW/job    = ET × (%CPU/NJ)
+                    • Time Left = prev Time Left − HW/job  (terminates when Time Left reaches 0)
 
                 ══════════════════════════════════════════════════════════════════════
                   KEYBOARD SHORTCUTS & TIPS
