@@ -60,7 +60,7 @@ java -jar Hyperpuff.jar
 ## Modules, Algorithms & Sample Verification
 
 ### 1. CPU Scheduling (`src/modules/cpu/CpuModule.java`)
-* **Algorithms**: FIFO (FCFS), SJF, SRT, Priority (Non-preemptive & Preemptive; lower number = higher priority), Round Robin (custom quantum).
+* **Algorithms**: FIFO, SJF, SRT, Priority (Non-preemptive & Preemptive; lower number = higher priority), Round Robin (custom quantum).
 * **Formulas**: `TAT = CT - AT`, `WT = TAT - RT`, `AWT = avg(WT)`, `ATAT = avg(TAT)`.
 * **Outputs**: Full job table (`J#, AT, RT, ST, FT, WT, CT, TAT`), Gantt chart, and **Compare All 6 Algorithms** table.
 * **Sample Verification**: 7 jobs (`AT: 0,5,10,15,20,25,30`, `RT: 30,15,25,10,20,5,15`, `q=10`) → FIFO `AWT=46.43, ATAT=63.57`; SJF `33.57 / 50.71`; SRT `27.86 / 45.00`; RR `57.86 / 75.00`.
@@ -92,9 +92,9 @@ java -jar Hyperpuff.jar
 * **Sample Verification**: Blocks `100 500 200 300 600`, Processes `212 417 112 426` (First Fit) → `959 KB free`, `P3 not allocated`.
 
 ### 7. Disk Scheduling (`src/modules/disk/DiskModule.java`)
-* **Algorithms**: FCFS, SSTF, SCAN, C-SCAN, LOOK, C-LOOK.
+* **Algorithms**: FIFO, SSTF, SCAN, C-SCAN, LOOK, C-LOOK.
 * **Outputs**: Service order, total head movement (cylinders), average seek, seek-path graph, and **Compare All 6 Algorithms** table.
-* **Sample Verification**: Head `53`, Max `199`, Queue `98 183 37 122 14 124 65 67` → SSTF `236 cyl`, FCFS `640 cyl`.
+* **Sample Verification**: Head `53`, Max `199`, Queue `98 183 37 122 14 124 65 67` → SSTF `236 cyl`, FIFO `640 cyl`.
 
 ### 8. Multiprogramming (`src/modules/multiprogramming/MultiprogrammingModule.java`)
 * **Dynamic Input**: Variable number of jobs (`AT`, `BT` in decimal or `HH:mm`), `% I/O Wait`, and `Start Time`.

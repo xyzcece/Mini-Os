@@ -683,7 +683,7 @@ public class MiniOS extends JFrame {
                 ══════════════════════════════════════════════════════════════════════
                   Purpose : Decides which ready process runs on the CPU and in what order.
                   Algorithms:
-                    • FIFO / FCFS — Runs jobs strictly in Arrival Time (AT) order.
+                    • FIFO — Runs jobs strictly in Arrival Time (AT) order.
                     • SJF (Non-Preemptive) — Picks the ready job with the shortest Burst/Run Time (RT).
                     • SRT (Preemptive SJF) — Always switches to the ready job with the least remaining time.
                     • Priority (Non-Preemptive / Preemptive) — Lower priority number = higher priority (1 is highest).
@@ -757,7 +757,7 @@ public class MiniOS extends JFrame {
                 ══════════════════════════════════════════════════════════════════════
                   Purpose : Orders pending disk track requests to minimize disk arm seek time.
                   Algorithms:
-                    • FCFS — Services tracks in arrival order.
+                    • FIFO — Services tracks in arrival order.
                     • SSTF — Always moves to the closest pending track (Shortest Seek Time First).
                     • SCAN / LOOK — Sweeps in one direction then reverses (SCAN hits disk end; LOOK stops at last request).
                     • C-SCAN / C-LOOK — Sweeps one direction only, then jumps back to the start.

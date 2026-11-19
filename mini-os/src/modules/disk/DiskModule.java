@@ -20,7 +20,7 @@ import shared.Theme;
 /**
  * DISK SCHEDULING  —  OWNER: Member 2
  *   [x] Requests, initial head, disk max, algorithm dropdown + direction toggle
- *   [x] FCFS, SSTF, SCAN, C-SCAN, LOOK, C-LOOK
+ *   [x] FIFO, SSTF, SCAN, C-SCAN, LOOK, C-LOOK
  *   [x] Seek table (next track, traverse) + total cylinders + ave seek
  *   [x] Seek-path graph + all-algorithm comparison
  * CHECK: SSTF (head 53): 236 cylinders
@@ -29,7 +29,7 @@ import shared.Theme;
  */
 public class DiskModule extends FigmaModule {
     private static final long serialVersionUID = 1L;
-    static final String[] ALGOS = {"FCFS", "SSTF", "SCAN", "C-SCAN", "LOOK", "C-LOOK"};
+    static final String[] ALGOS = {"FIFO", "SSTF", "SCAN", "C-SCAN", "LOOK", "C-LOOK"};
     private static final String SAMPLE_REQUESTS = "98 183 37 122 14 124 65 67";
     private static final String SAMPLE_HEAD = "53";
     private static final String SAMPLE_MAX = "199";
@@ -38,7 +38,7 @@ public class DiskModule extends FigmaModule {
     private static final String LARGE_MAX = "499";
 
     private RoundField requests, head, max;
-    private String algo = "FCFS";
+    private String algo = "FIFO";
     private boolean dirUp = true;
     private boolean hasRun = false;
     private final transient List<HistoryItem> history = new ArrayList<>();
@@ -457,13 +457,13 @@ public class DiskModule extends FigmaModule {
             case "C-SCAN" -> "Rule (C-SCAN): sweep " + dir + " serving requests to the end of the disk, jump to the other end, and sweep the same way again.";
             case "LOOK" -> "Rule (LOOK): sweep " + dir + " serving requests, turn around at the last request (not the disk end).";
             case "C-LOOK" -> "Rule (C-LOOK): sweep " + dir + " to the last request, jump to the farthest request on the other side, and sweep the same way again.";
-            default -> "Rule (FCFS): serve the requests in the order they were given.";
+            default -> "Rule (FIFO): serve the requests in the order they were given.";
         });
         out.add("Start: head at track " + head + ".");
         for (Step s : res.steps) {
             String why = s.boundary ? "end of the sweep" : switch (algo) {
                 case "SSTF" -> "closest pending request";
-                case "FCFS" -> "next in the list";
+                case "FIFO" -> "next in the list";
                 default -> "next request in the sweep";
             };
             out.add(String.format("%d → %d (%s): |%d − %d| = %,d cylinders.", s.from, s.to, why, s.to, s.from, s.traverse));
@@ -498,7 +498,7 @@ public class DiskModule extends FigmaModule {
         List<Boolean> isBoundary = new ArrayList<>();
 
         switch (algo) {
-            case "FCFS" -> {
+            case "FIFO" -> {
                 for (int req : requests) {
                     order.add(req);
                     isBoundary.add(false);
