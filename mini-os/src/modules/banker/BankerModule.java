@@ -21,28 +21,8 @@ import shared.Fonts;
 import shared.Theme;
 
 /**
- * BANKER'S ALGORITHM — OWNER: Member 3
- * [x] Available, Allocation and Maximum grids, flexible process AND
- * resource-type counts
- * [x] Need = Maximum - Allocation
- * [x] AVAILABLE ladder: start, then the Available vector after each process is
- * released
- * [x] SAFE / NOT SAFE verdict chips and the safe sequence
- * [x] Validation: blank, letters, negatives, Allocation > Maximum - never
- * crashes
- * CHECK: sample data (5 processes x 4 resource types) -> SAFE, sequence P3, P4,
- * P5, P1, P2
- * AVAILABLE ladder: start 3 2 2 1 -> +P3 4 5 4 4 -> +P4 5 8 6 4 -> +P5 7 8 7 7
- * -> +P1 8 8 7 9 -> +P2 10 8 8 11
- *
- * Words used on this page:
- * Allocation = what each process already holds Maximum = the most it will ever
- * ask for
- * Need = Maximum - Allocation Available = free units, updated after each
- * release
- *
- * The page design (header, inputs, run button, result card) comes from
- * FigmaModule.
+ * Banker's Algorithm simulator: computes Need = Maximum - Allocation,
+ * runs the safety check, and displays the Available ladder and safe sequence.
  */
 public class BankerModule extends FigmaModule {
     private static final long serialVersionUID = 1L;
@@ -129,10 +109,16 @@ public class BankerModule extends FigmaModule {
 
     @Override
     protected int inputsTop() {
-        return 4;
+        return 2;
     }
 
     // ============================ INPUTS ============================
+
+    private static final int CELL_W = 68;
+    private static final int CELL_H = 34;
+    private static final int CELL_GAP = 7;
+    private static final int ROW_LABEL_W = 40;
+    private static final int HEAD_H = 22;
 
     @Override
     protected void buildInputs(JPanel p) {
@@ -142,92 +128,260 @@ public class BankerModule extends FigmaModule {
         stack.setOpaque(false);
         stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
         stack.setAlignmentX(LEFT_ALIGNMENT);
-        stack.add(availableBox());
+        stack.add(splitRow(availableBox(), structureBox(), 1, 1, 16, 760));
         stack.add(Box.createVerticalStrut(10));
-        stack.add(wrapRow(16,
+        stack.add(splitRow(
                 matrixBox("ALLOCATION", allocText, true),
-                matrixBox("MAXIMUM", maxText, false)));
-        stack.add(Box.createVerticalStrut(10));
-        stack.add(structureRow());
+                matrixBox("MAXIMUM", maxText, false),
+                1, 1, 16, 760));
         p.add(stack, BorderLayout.CENTER);
         p.add(toolbar(), BorderLayout.SOUTH);
     }
 
-    /** "AVAILABLE" box: one small field per resource type. */
+    /** Full-width row: fixed label on left, evenly stretched columns in center, optional action on right. */
+    private static JPanel gridRow(JComponent left, JPanel cols, JComponent right, int height) {
+        JPanel row = new JPanel(new BorderLayout(CELL_GAP, 0));
+        row.setOpaque(false);
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.add(left, BorderLayout.WEST);
+        row.add(cols, BorderLayout.CENTER);
+        if (right != null)
+            row.add(right, BorderLayout.EAST);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+        return row;
+    }
+
+    private static final int SCROLL_COL_THRESHOLD = 6;
+    private static final int SCROLL_ROW_THRESHOLD = 10;
+    private static final int COMPACT_CELL_W = 58;
+
+    private JPanel colGrid() {
+        JPanel g = new JPanel(new GridLayout(1, resources, CELL_GAP, 0));
+        g.setOpaque(false);
+        return g;
+    }
+
+    /** Wraps wide (>6 resources) or tall (>10 processes) grids in a styled scroll pane so cells never squish. */
+    private JComponent wrapScrollIfNeeded(JPanel inner, int contentH, boolean allowVScroll) {
+        boolean needH = resources > SCROLL_COL_THRESHOLD;
+        boolean needV = allowVScroll && procs > SCROLL_ROW_THRESHOLD;
+        if (!needH && !needV)
+            return inner;
+
+        int minW = ROW_LABEL_W + CELL_GAP + resources * COMPACT_CELL_W + Math.max(0, resources - 1) * CELL_GAP + 36;
+        if (needH) {
+            inner.setPreferredSize(new Dimension(minW, contentH));
+        }
+        JScrollPane sp = new JScrollPane(inner,
+                needV ? ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED : ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+                needH ? ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED : ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        sp.setBorder(BorderFactory.createEmptyBorder());
+        sp.setOpaque(false);
+        sp.getViewport().setOpaque(false);
+        sp.getVerticalScrollBar().setUnitIncrement(24);
+        sp.getHorizontalScrollBar().setUnitIncrement(32);
+        styleScrollPane(sp);
+        int visH = needV ? Math.min(310, contentH + (needH ? 16 : 4)) : contentH + (needH ? 18 : 2);
+        sp.setPreferredSize(new Dimension(300, visH));
+        sp.setMaximumSize(new Dimension(Integer.MAX_VALUE, visH));
+        sp.setAlignmentX(LEFT_ALIGNMENT);
+        return sp;
+    }
+
+    /** "AVAILABLE" box: one field per resource type. */
     private JComponent availableBox() {
         Box12 b = new Box12(null);
+        b.setBorder(new EmptyBorder(10, 14, 10, 14));
         b.setLayout(new BoxLayout(b, BoxLayout.Y_AXIS));
         b.add(pixelText("AVAILABLE", 7f, Theme.green(), 0f));
-        b.add(Box.createVerticalStrut(8));
+        b.add(Box.createVerticalStrut(6));
 
-        JPanel ids = hRow(), vals = hRow();
+        boolean padRight = procs > 1;
+        int cellW = resources > SCROLL_COL_THRESHOLD ? COMPACT_CELL_W : CELL_W;
+        JPanel idCols = colGrid(), valCols = colGrid();
         availF = new RoundField[resources];
         for (int j = 0; j < resources; j++) {
-            availF[j] = new RoundField(availText[j], 6, 50, 32);
+            availF[j] = new RoundField(availText[j], 6, cellW, CELL_H);
             availF[j].addActionListener(e -> onRunPressed());
-            if (j > 0) {
-                ids.add(Box.createHorizontalStrut(6));
-                vals.add(Box.createHorizontalStrut(6));
-            }
-            ids.add(cell("R" + (j + 1), 50, 22, Theme.muted()));
-            vals.add(availF[j]);
+            attachGridNav(availF[j], -1, j, 0);
+            attachLiveCheck(availF[j], -1, j);
+            idCols.add(cell("R" + (j + 1), cellW, HEAD_H, Theme.muted()));
+            valCols.add(availF[j]);
         }
-        b.add(ids);
+        JPanel inner = new JPanel();
+        inner.setOpaque(false);
+        inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
+        inner.setAlignmentX(LEFT_ALIGNMENT);
+        inner.add(gridRow(cell("", ROW_LABEL_W, HEAD_H, Theme.muted()), idCols,
+                padRight ? cell("", 24, HEAD_H, Theme.muted()) : null, HEAD_H));
+        inner.add(Box.createVerticalStrut(4));
+        inner.add(gridRow(cell("Avail", ROW_LABEL_W, CELL_H, Theme.muted()), valCols,
+                padRight ? cell("", 24, CELL_H, Theme.muted()) : null, CELL_H));
+
+        int contentH = HEAD_H + 4 + CELL_H + 2;
+        b.add(wrapScrollIfNeeded(inner, contentH, false));
         b.add(Box.createVerticalStrut(6));
-        b.add(vals);
-        b.add(Box.createVerticalStrut(8));
-        b.add(body("One value per resource", 11, Theme.muted()));
+        b.add(body(resources > SCROLL_COL_THRESHOLD
+                ? "One value per resource · Scroll horizontally for all " + resources + " resources"
+                : "One value per resource", 11, Theme.muted()));
         return b;
     }
 
-    /** An n x m grid of small fields with P# row labels and R# column headers. */
+    /** An n x m grid of fields with P# row labels and R# column headers. */
     private JComponent matrixBox(String caption, String[][] data, boolean isAlloc) {
         Box12 b = new Box12(null);
+        b.setBorder(new EmptyBorder(10, 14, 10, 14));
         b.setLayout(new BoxLayout(b, BoxLayout.Y_AXIS));
         b.add(pixelText(caption, 7f, Theme.text(), 0f));
-        b.add(Box.createVerticalStrut(8));
+        b.add(Box.createVerticalStrut(6));
 
-        JPanel ids = hRow();
-        ids.add(cell("", 34, 22, Theme.muted()));
+        boolean showDel = isAlloc && procs > 1;
+        int cellW = resources > SCROLL_COL_THRESHOLD ? COMPACT_CELL_W : CELL_W;
+        JPanel inner = new JPanel();
+        inner.setOpaque(false);
+        inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
+        inner.setAlignmentX(LEFT_ALIGNMENT);
+
+        JPanel idCols = colGrid();
         for (int j = 0; j < resources; j++) {
-            ids.add(Box.createHorizontalStrut(6));
-            ids.add(cell("R" + (j + 1), 50, 22, Theme.muted()));
+            idCols.add(cell("R" + (j + 1), cellW, HEAD_H, Theme.muted()));
         }
-        b.add(ids);
+        inner.add(gridRow(cell("", ROW_LABEL_W, HEAD_H, Theme.muted()), idCols,
+                showDel ? cell("", 24, HEAD_H, Theme.muted()) : null, HEAD_H));
 
         RoundField[][] fields = new RoundField[procs][resources];
         for (int i = 0; i < procs; i++) {
             final int rowIdx = i;
-            b.add(Box.createVerticalStrut(6));
-            JPanel row = hRow();
-            row.add(cell("P" + (i + 1), 34, 32, Theme.muted()));
+            inner.add(Box.createVerticalStrut(i == 0 ? 6 : CELL_GAP));
+            JPanel valCols = colGrid();
             for (int j = 0; j < resources; j++) {
-                fields[i][j] = new RoundField(data[i][j], 6, 50, 32);
+                fields[i][j] = new RoundField(data[i][j], 6, cellW, CELL_H);
                 fields[i][j].addActionListener(e -> onRunPressed());
-                row.add(Box.createHorizontalStrut(6));
-                row.add(fields[i][j]);
+                attachGridNav(fields[i][j], i, j, isAlloc ? 1 : 2);
+                attachLiveCheck(fields[i][j], i, j);
+                valCols.add(fields[i][j]);
             }
-            if (isAlloc && procs > 1) {
-                row.add(Box.createHorizontalStrut(4));
+            JComponent right = null;
+            if (showDel) {
                 JButton delRow = new JButton("×");
-                delRow.setFont(Fonts.uiBold(13f));
+                delRow.setFont(Fonts.uiBold(14f));
                 delRow.setForeground(Theme.pink());
                 delRow.setContentAreaFilled(false);
                 delRow.setBorderPainted(false);
                 delRow.setFocusPainted(false);
+                delRow.setFocusable(false);
                 delRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                 delRow.setMargin(new Insets(0, 4, 0, 4));
+                delRow.setPreferredSize(new Dimension(24, CELL_H));
+                delRow.setMaximumSize(new Dimension(24, CELL_H));
                 delRow.setToolTipText("Remove process P" + (i + 1));
                 delRow.addActionListener(e -> removeProcessAt(rowIdx));
-                row.add(delRow);
+                right = delRow;
             }
-            b.add(row);
+            inner.add(gridRow(cell("P" + (i + 1), ROW_LABEL_W, CELL_H, Theme.muted()), valCols, right, CELL_H));
         }
+        int contentH = HEAD_H + 6 + procs * CELL_H + Math.max(0, procs - 1) * CELL_GAP + 4;
+        b.add(wrapScrollIfNeeded(inner, contentH, true));
         if (isAlloc)
             allocF = fields;
         else
             maxF = fields;
         return b;
+    }
+
+    /** Arrow-key navigation and Shift+Delete full-row clear (grid: 0 = Available, 1 = Allocation, 2 = Maximum). */
+    private void attachGridNav(RoundField f, int r, int c, int grid) {
+        f.addKeyListener(new java.awt.event.KeyAdapter() {
+            @Override
+            public void keyPressed(java.awt.event.KeyEvent e) {
+                int code = e.getKeyCode();
+                if (code == java.awt.event.KeyEvent.VK_DELETE && e.isShiftDown()) {
+                    saveFields();
+                    pushUndo();
+                    if (grid == 0) {
+                        for (int j = 0; j < availF.length; j++) {
+                            availF[j].setText("");
+                            availF[j].setInvalid(false);
+                            availText[j] = "";
+                        }
+                        markInputsDirty();
+                        showToast(BankerModule.this, "Cleared AVAILABLE row · Ctrl+Z to undo");
+                    } else if (r >= 0 && r < procs) {
+                        for (int j = 0; j < resources; j++) {
+                            if (r < allocF.length && j < allocF[r].length) {
+                                allocF[r][j].setText("");
+                                allocF[r][j].setInvalid(false);
+                            }
+                            if (r < maxF.length && j < maxF[r].length) {
+                                maxF[r][j].setText("");
+                                maxF[r][j].setInvalid(false);
+                            }
+                            allocText[r][j] = "";
+                            maxText[r][j] = "";
+                        }
+                        markInputsDirty();
+                        showToast(BankerModule.this, "Cleared row P" + (r + 1) + " · Ctrl+Z to undo");
+                    }
+                    e.consume();
+                    return;
+                }
+                boolean allSelected = f.getSelectionStart() == 0 && f.getSelectionEnd() == f.getDocument().getLength();
+                RoundField target = null;
+                if (code == java.awt.event.KeyEvent.VK_UP) {
+                    if (grid > 0 && r > 0)
+                        target = (grid == 1 ? allocF : maxF)[r - 1][c];
+                    else if (grid == 1 && r == 0 && c < availF.length)
+                        target = availF[c];
+                } else if (code == java.awt.event.KeyEvent.VK_DOWN) {
+                    if (grid == 0 && allocF.length > 0 && c < allocF[0].length)
+                        target = allocF[0][c];
+                    else if (grid > 0 && r + 1 < procs)
+                        target = (grid == 1 ? allocF : maxF)[r + 1][c];
+                } else if (code == java.awt.event.KeyEvent.VK_LEFT
+                        && (allSelected || f.getCaretPosition() == 0)) {
+                    if (c > 0)
+                        target = grid == 0 ? availF[c - 1] : (grid == 1 ? allocF : maxF)[r][c - 1];
+                } else if (code == java.awt.event.KeyEvent.VK_RIGHT
+                        && (allSelected || f.getCaretPosition() == f.getDocument().getLength())) {
+                    if (c + 1 < resources)
+                        target = grid == 0 ? availF[c + 1] : (grid == 1 ? allocF : maxF)[r][c + 1];
+                }
+                if (target != null) {
+                    target.requestFocusInWindow();
+                    e.consume();
+                }
+            }
+        });
+    }
+
+    /** Highlights non-digits or Allocation > Maximum as soon as the user types. */
+    private void attachLiveCheck(RoundField f, int r, int c) {
+        f.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            private void check() {
+                String t = f.getText().trim();
+                boolean badSelf = !t.isEmpty() && whole(t) == null;
+                if (r < 0) {
+                    f.setInvalid(badSelf);
+                    return;
+                }
+                if (r < allocF.length && r < maxF.length && c < allocF[r].length && c < maxF[r].length) {
+                    RoundField af = allocF[r][c], mf = maxF[r][c];
+                    if (af == null || mf == null)
+                        return;
+                    String at = af.getText().trim(), mt = mf.getText().trim();
+                    Integer av = whole(at), mv = whole(mt);
+                    boolean over = av != null && mv != null && av > mv;
+                    af.setInvalid(over || (!at.isEmpty() && av == null));
+                    mf.setInvalid(over || (!mt.isEmpty() && mv == null));
+                } else {
+                    f.setInvalid(badSelf);
+                }
+            }
+
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { check(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { check(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { check(); }
+        });
     }
 
     private void removeProcessAt(int idx) {
@@ -253,11 +407,13 @@ public class BankerModule extends FigmaModule {
         showToast(this, "Removed process P" + (idx + 1) + " · Ctrl+Z to undo");
     }
 
-    /** Grid-size controls: how many processes and how many resource types. */
-    private JComponent structureRow() {
-        JPanel row = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 4));
-        row.setOpaque(false);
-        row.setAlignmentX(LEFT_ALIGNMENT);
+    /** Grid-size controls beside AVAILABLE so RUN SIMULATION stays visible above the fold. */
+    private JComponent structureBox() {
+        Box12 b = new Box12(null);
+        b.setBorder(new EmptyBorder(10, 14, 10, 14));
+        b.setLayout(new BoxLayout(b, BoxLayout.Y_AXIS));
+        b.add(pixelText("GRID SIZE", 7f, Theme.pink(), 0f));
+        b.add(Box.createVerticalStrut(8));
 
         DashedPill addP = new DashedPill("+1 Process");
         addP.addActionListener(e -> resize(procs + 1, resources, "Added process P" + (procs + 1)));
@@ -272,8 +428,21 @@ public class BankerModule extends FigmaModule {
         delR.addActionListener(e -> resize(procs, resources - 1, "Removed resource R" + resources));
         delR.setEnabled(resources > 1);
 
-        RoundField pBox = new RoundField(String.valueOf(procs), 6, 42, 28);
-        RoundField rBox = new RoundField(String.valueOf(resources), 6, 42, 28);
+        JPanel btnRow = hRow();
+        btnRow.add(addP);
+        btnRow.add(Box.createHorizontalStrut(6));
+        btnRow.add(add5P);
+        btnRow.add(Box.createHorizontalStrut(6));
+        btnRow.add(delP);
+        btnRow.add(Box.createHorizontalStrut(6));
+        btnRow.add(addR);
+        btnRow.add(Box.createHorizontalStrut(6));
+        btnRow.add(delR);
+        b.add(btnRow);
+        b.add(Box.createVerticalStrut(8));
+
+        RoundField pBox = new RoundField(String.valueOf(procs), 6, 48, 30);
+        RoundField rBox = new RoundField(String.valueOf(resources), 6, 48, 30);
         Runnable applyDims = () -> {
             try {
                 int np = Integer.parseInt(pBox.getText().trim());
@@ -293,23 +462,24 @@ public class BankerModule extends FigmaModule {
         DashedPill setBtn = new DashedPill("Set");
         setBtn.addActionListener(e -> applyDims.run());
 
-        row.add(addP);
-        row.add(add5P);
-        row.add(delP);
-        row.add(addR);
-        row.add(delR);
-        row.add(pBox);
-        row.add(body("×", 12, Theme.muted()));
-        row.add(rBox);
-        row.add(setBtn);
-        row.add(body(procs + (procs == 1 ? " process / " : " processes / ")
+        JPanel dimRow = hRow();
+        dimRow.add(pBox);
+        dimRow.add(Box.createHorizontalStrut(6));
+        dimRow.add(body("×", 12, Theme.muted()));
+        dimRow.add(Box.createHorizontalStrut(6));
+        dimRow.add(rBox);
+        dimRow.add(Box.createHorizontalStrut(8));
+        dimRow.add(setBtn);
+        dimRow.add(Box.createHorizontalStrut(10));
+        dimRow.add(body(procs + (procs == 1 ? " process / " : " processes / ")
                 + resources + (resources == 1 ? " resource" : " resources"), 11, Theme.pink()));
-        return row;
+        b.add(dimRow);
+        return b;
     }
 
     /** Sample / Large / Random / History / Undo / Clear pills. */
     private JComponent toolbar() {
-        JPanel tools = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 6));
+        JPanel tools = new JPanel(new WrapLayout(FlowLayout.LEFT, 8, 5));
         tools.setOpaque(false);
         tools.setBorder(new EmptyBorder(6, 0, 0, 0));
 
@@ -360,13 +530,6 @@ public class BankerModule extends FigmaModule {
             showToast(this, "Cleared all cells");
         });
 
-        tools.add(sample);
-        tools.add(unsafe);
-        tools.add(large);
-        tools.add(random);
-        tools.add(hist);
-        tools.add(undo);
-        tools.add(clear);
         DashedPill bad = new DashedPill("Invalid input test");
         bad.addActionListener(e -> {
             pushUndo();
@@ -377,7 +540,15 @@ public class BankerModule extends FigmaModule {
             rerun();
             showToast(this, "Loaded bad input - the red cells show what to fix");
         });
+
+        tools.add(sample);
+        tools.add(large);
+        tools.add(unsafe);
         tools.add(bad);
+        tools.add(random);
+        tools.add(hist);
+        tools.add(undo);
+        tools.add(clear);
         return tools;
     }
 
@@ -396,20 +567,12 @@ public class BankerModule extends FigmaModule {
         return g;
     }
 
-    /**
-     * Forgets the on-screen fields so the next rebuild takes the text arrays as
-     * they are.
-     * Call this straight after replacing the text arrays, otherwise the rebuild
-     * would call
-     * saveFields() first and copy the old (empty) cells back over the new data.
-     */
     private void discardFields() {
         availF = new RoundField[0];
         allocF = new RoundField[0][0];
         maxF = new RoundField[0][0];
     }
 
-    /** Copies whatever is typed in the fields back into the text arrays. */
     private void saveFields() {
         if (availF.length == resources) {
             for (int j = 0; j < resources; j++)
@@ -427,14 +590,9 @@ public class BankerModule extends FigmaModule {
         }
     }
 
-    /** Grows or shrinks the grids, keeping everything the person already typed. */
-    /**
-     * Biggest grid this page will build. Unlike the list-style modules it lays out one input
-     * box per cell, so the product of the two counts is what matters, not either on its own:
-     * 400 x 30 is about a second to build, so the cell budget is set near that.
-     */
     private static final int MAX_RESOURCES = 100, MAX_CELLS = 20_000;
 
+    /** Resizes the grids while preserving existing cell values. */
     private void resize(int newProcs, int newRes, String toastMsg) {
         if (newProcs < 1 || newRes < 1)
             return;
@@ -563,7 +721,7 @@ public class BankerModule extends FigmaModule {
     protected void onRunPressed() {
         saveFields();
         hasRun = true;
-        rerun();
+        super.onRunPressed();
     }
 
     @Override
@@ -836,7 +994,9 @@ public class BankerModule extends FigmaModule {
     static Safety checkSafety(int[] available, int[][] alloc, int[][] need) {
         int n = need.length, m = available.length;
         Safety s = new Safety();
-        int[] work = available.clone();
+        long[] work = new long[m];
+        for (int j = 0; j < m; j++)
+            work[j] = available[j];
         boolean[] finished = new boolean[n];
         int done = 0;
         boolean progress = true;
@@ -845,10 +1005,10 @@ public class BankerModule extends FigmaModule {
             for (int i = 0; i < n; i++) {
                 if (finished[i] || !fits(need[i], work))
                     continue;
-                int[] before = work.clone();
+                int[] before = clampInt(work);
                 for (int j = 0; j < m; j++)
                     work[j] += alloc[i][j];
-                s.steps.add(new SafeStep(i, need[i].clone(), before, alloc[i].clone(), work.clone()));
+                s.steps.add(new SafeStep(i, need[i].clone(), before, alloc[i].clone(), clampInt(work)));
                 s.order.add(i);
                 finished[i] = true;
                 done++;
@@ -856,7 +1016,7 @@ public class BankerModule extends FigmaModule {
             }
         }
         s.safe = done == n;
-        s.finalWork = work;
+        s.finalWork = clampInt(work);
         for (int i = 0; i < n; i++)
             if (!finished[i])
                 s.blocked.add(i);
@@ -872,7 +1032,9 @@ public class BankerModule extends FigmaModule {
         int n = need.length, m = available.length;
         out.add("Need = Maximum - Allocation for every process (the NEED columns above).");
         out.add("Start: Work = Available = " + plain(available) + ".");
-        int[] work = available.clone();
+        long[] work = new long[m];
+        for (int j = 0; j < m; j++)
+            work[j] = available[j];
         boolean[] finished = new boolean[n];
         int done = 0, pass = 0;
         boolean progress = true;
@@ -883,12 +1045,12 @@ public class BankerModule extends FigmaModule {
                 if (finished[i])
                     continue;
                 if (fits(need[i], work)) {
-                    int[] before = work.clone();
+                    int[] before = clampInt(work);
                     for (int j = 0; j < m; j++)
                         work[j] += alloc[i][j];
                     out.add(String.format(
                             "Pass %d: P%d Need %s fits in Work %s → P%d can finish and gives back its Allocation %s → Work = %s.",
-                            pass, i + 1, plain(need[i]), plain(before), i + 1, plain(alloc[i]), plain(work)));
+                            pass, i + 1, plain(need[i]), plain(before), i + 1, plain(alloc[i]), plain(clampInt(work))));
                     finished[i] = true;
                     done++;
                     progress = true;
@@ -898,7 +1060,7 @@ public class BankerModule extends FigmaModule {
                         if (need[i][j] > work[j])
                             short_.append(short_.length() > 0 ? ", " : "").append("R").append(j + 1);
                     out.add(String.format("Pass %d: P%d Need %s is more than Work %s (not enough %s) → P%d waits.",
-                            pass, i + 1, plain(need[i]), plain(work), short_, i + 1));
+                            pass, i + 1, plain(need[i]), plain(clampInt(work)), short_, i + 1));
                 }
             }
         }
@@ -910,11 +1072,18 @@ public class BankerModule extends FigmaModule {
         return out;
     }
 
-    private static boolean fits(int[] need, int[] work) {
+    private static boolean fits(int[] need, long[] work) {
         for (int j = 0; j < need.length; j++)
             if (need[j] > work[j])
                 return false;
         return true;
+    }
+
+    private static int[] clampInt(long[] work) {
+        int[] out = new int[work.length];
+        for (int j = 0; j < work.length; j++)
+            out[j] = (int) Math.min(Integer.MAX_VALUE, work[j]);
+        return out;
     }
 
     /** "3 2 2 1" */
@@ -1035,8 +1204,9 @@ public class BankerModule extends FigmaModule {
                 if (sbs) {
                     int avail = Math.max(1, getWidth() - gap);
                     int wa = (int) Math.round(avail * frA / (frA + frB));
-                    a.setBounds(0, 0, wa, a.getPreferredSize().height);
-                    b.setBounds(wa + gap, 0, avail - wa, b.getPreferredSize().height);
+                    int h = Math.max(a.getPreferredSize().height, b.getPreferredSize().height);
+                    a.setBounds(0, 0, wa, h);
+                    b.setBounds(wa + gap, 0, avail - wa, h);
                 } else {
                     int ha = a.getPreferredSize().height;
                     a.setBounds(0, 0, getWidth(), ha);

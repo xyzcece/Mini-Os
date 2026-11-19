@@ -18,12 +18,8 @@ import shared.ModulePanel;
 import shared.Theme;
 
 /**
- * Page layout + building blocks from the Figma "mini-os" file, used by Member 1's modules
- * (CPU Scheduling, Segmentation). OWNER: Member 1.
- *
- * Page:  HYPERPUFF bar · breadcrumb / gradient title / subtitle / heron sticker · lead sentence
- *        · inputs · RUN SIMULATION · result card.
- * A module extends this instead of ModulePanel and fills in crumb(), lead(), buildInputs(), runSimulation().
+ * Shared page template and UI components for Hyperpuff OS Lab modules:
+ * header, input section, RUN SIMULATION trigger, and simulation output card.
  */
 public abstract class FigmaModule extends ModulePanel {
     private static final long serialVersionUID = 1L;
@@ -83,15 +79,10 @@ public abstract class FigmaModule extends ModulePanel {
         copyBtn.setToolTipText("Copy simulation summary to clipboard");
         copyBtn.addActionListener(e -> copyResultsSummary());
 
-        PixelButton topBtn = new PixelButton("BACK TO TOP", true);
-        topBtn.setToolTipText("Scroll smoothly back to the top");
-        topBtn.addActionListener(e -> smoothScrollToTop());
-
         Row topRow = new Row(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         topRow.setBorder(new EmptyBorder(12, 0, 0, 0));
         topRow.add(saveBtn);
         topRow.add(copyBtn);
-        topRow.add(topBtn);
         add(topRow);
 
         // Ctrl+Enter runs simulation, Ctrl+Z triggers undo from anywhere in the module
@@ -137,6 +128,7 @@ public abstract class FigmaModule extends ModulePanel {
     /** Called when RUN SIMULATION (or Ctrl+Enter) is pressed. */
     protected void onRunPressed() {
         rerun();
+        if (resultsCard != null) resultsCard.pulse();
         scrollToResults();
     }
 
@@ -165,7 +157,9 @@ public abstract class FigmaModule extends ModulePanel {
         }
     }
 
-    /** Scrolls the module viewport down to show results/errors after RUN SIMULATION. */
+    private Timer scrollAnimTimer;
+
+    /** Smoothly scrolls the module viewport down to show results/errors after RUN SIMULATION. */
     private void scrollToResults() {
         SwingUtilities.invokeLater(() -> {
             if (resultsCard == null) return;
@@ -173,10 +167,23 @@ public abstract class FigmaModule extends ModulePanel {
             if (sp == null) return;
             JScrollBar vsb = sp.getVerticalScrollBar();
             int viewH = sp.getViewport().getHeight();
-            int targetY = Math.max(0, resultsCard.getY() - 24);
-            if (resultsCard.getY() > vsb.getValue() + (int) (viewH * 0.45)) {
-                vsb.setValue(Math.min(targetY, Math.max(0, vsb.getMaximum() - viewH)));
-            }
+            int maxScroll = Math.max(0, vsb.getMaximum() - viewH);
+            int targetY = Math.min(Math.max(0, resultsCard.getY() - 20), maxScroll);
+            if (targetY <= vsb.getValue() + 8) return;
+            if (scrollAnimTimer != null && scrollAnimTimer.isRunning()) scrollAnimTimer.stop();
+            scrollAnimTimer = new Timer(14, null);
+            scrollAnimTimer.addActionListener(e -> {
+                int cur = vsb.getValue();
+                int diff = targetY - cur;
+                if (diff <= 2) {
+                    vsb.setValue(targetY);
+                    scrollAnimTimer.stop();
+                } else {
+                    int step = Math.max(8, (int) Math.ceil(diff * 0.24));
+                    vsb.setValue(Math.min(targetY, cur + step));
+                }
+            });
+            scrollAnimTimer.start();
         });
     }
 
@@ -219,23 +226,24 @@ public abstract class FigmaModule extends ModulePanel {
     }
 
     /** Smoothly animates the enclosing JScrollPane back to the top. */
-    protected void smoothScrollToTop() {
+    public void smoothScrollToTop() {
         JScrollPane sp = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, this);
         if (sp == null) return;
         JScrollBar vsb = sp.getVerticalScrollBar();
         if (vsb.getValue() <= 0) return;
-        Timer t = new Timer(14, null);
-        t.addActionListener(e -> {
+        if (scrollAnimTimer != null && scrollAnimTimer.isRunning()) scrollAnimTimer.stop();
+        scrollAnimTimer = new Timer(14, null);
+        scrollAnimTimer.addActionListener(e -> {
             int cur = vsb.getValue();
             if (cur <= 2) {
                 vsb.setValue(0);
-                t.stop();
+                scrollAnimTimer.stop();
             } else {
                 int step = Math.max(8, (int) Math.ceil(cur * 0.25));
                 vsb.setValue(Math.max(0, cur - step));
             }
         });
-        t.start();
+        scrollAnimTimer.start();
     }
 
     /** Exports the results card as a PNG image for lab reports or documentation. */
@@ -243,33 +251,53 @@ public abstract class FigmaModule extends ModulePanel {
         JComponent target = resultsCard != null ? resultsCard : results;
         int w = target.getWidth(), h = target.getHeight();
         if (w <= 0 || h <= 0) {
+            Dimension pref = target.getPreferredSize();
+            w = pref.width;
+            h = pref.height;
+        }
+        if (w <= 0 || h <= 0) {
             showToast(this, "Run a simulation first!");
             return;
         }
         String slug = title().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Save Simulation Result as PNG");
-        chooser.setSelectedFile(new File((slug.isEmpty() ? "simulation" : slug) + "-result.png"));
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("PNG Images (*.png)", "png"));
-        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        String defaultName = (slug.isEmpty() ? "simulation" : slug) + "-result.png";
 
-        File out = chooser.getSelectedFile();
-        if (!out.getName().toLowerCase().endsWith(".png")) {
-            out = new File(out.getParentFile(), out.getName() + ".png");
-        }
-        BufferedImage img = new BufferedImage(w + 24, h + 24, BufferedImage.TYPE_INT_RGB);
+        Window win = SwingUtilities.getWindowAncestor(this);
+        Frame owner = win instanceof Frame f ? f : null;
+        FileDialog fd = new FileDialog(owner, "Save Simulation Result as PNG", FileDialog.SAVE);
+        fd.setFile(defaultName);
+        fd.setFilenameFilter((dir, name) -> name.toLowerCase().endsWith(".png"));
+        fd.setVisible(true);
+
+        String dir = fd.getDirectory();
+        String file = fd.getFile();
+        if (dir == null || file == null) return;
+        if (!file.toLowerCase().endsWith(".png")) file = file + ".png";
+        File out = new File(dir, file);
+        if (out.getParentFile() != null) out.getParentFile().mkdirs();
+
+        boolean wasDimmed = resultsStale;
+        if (resultsCard != null && wasDimmed) resultsCard.setDimmed(false);
+        BufferedImage img = new BufferedImage(w + 24, h + 24, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2 = img.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2.setColor(Theme.bg());
         g2.fillRect(0, 0, img.getWidth(), img.getHeight());
         g2.translate(12, 12);
-        target.paint(g2);
+        target.printAll(g2);
         g2.dispose();
+        if (resultsCard != null && wasDimmed) resultsCard.setDimmed(true);
 
         try {
-            ImageIO.write(img, "png", out);
-            showToast(this, "Saved " + out.getName() + "!");
+            boolean written = ImageIO.write(img, "png", out);
+            if (written) {
+                showToast(this, "Saved " + out.getName() + "!");
+            } else {
+                showToast(this, "PNG writer not available");
+            }
         } catch (Exception ex) {
-            showToast(this, "Failed to save PNG");
+            showToast(this, "Failed to save PNG: " + ex.getMessage());
         }
     }
 
@@ -737,6 +765,28 @@ public abstract class FigmaModule extends ModulePanel {
                 @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { setInvalid(false); }
                 @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { setInvalid(false); }
             });
+            addFocusListener(new java.awt.event.FocusAdapter() {
+                @Override public void focusGained(java.awt.event.FocusEvent e) {
+                    repaint();
+                    if (fixed && !e.isTemporary()) SwingUtilities.invokeLater(RoundField.this::selectAll);
+                }
+                @Override public void focusLost(java.awt.event.FocusEvent e) {
+                    repaint();
+                }
+            });
+            if (fixed) {
+                addKeyListener(new java.awt.event.KeyAdapter() {
+                    @Override public void keyPressed(java.awt.event.KeyEvent e) {
+                        if (e.getKeyCode() == java.awt.event.KeyEvent.VK_DELETE
+                                && getSelectionStart() == getSelectionEnd()
+                                && getCaretPosition() == getDocument().getLength()
+                                && getDocument().getLength() > 0) {
+                            setText("");
+                            e.consume();
+                        }
+                    }
+                });
+            }
         }
         @Override public Dimension getPreferredSize() { return new Dimension(prefW, prefH); }
         @Override public Dimension getMinimumSize()   { return new Dimension(fixed ? prefW : 30, prefH); }
@@ -745,12 +795,25 @@ public abstract class FigmaModule extends ModulePanel {
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
             double w = getWidth(), h = getHeight() - 2;
+            boolean focused = isFocusOwner();
             g2.setColor(new Color(184, 74, 140, 20));                        // soft shadow below
-            g2.fill(new RoundRectangle2D.Double(0.75, 2.75, w - 1.5, h - 1.5, arc, arc));
-            RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, w - 1.5, h - 1.5, arc, arc);
+            g2.fill(new RoundRectangle2D.Double(1.5, 3.0, w - 3.0, h - 2.0, arc, arc));
+            RoundRectangle2D box = new RoundRectangle2D.Double(1.5, 1.5, w - 3.0, h - 2.5, arc, arc);
             g2.setColor(Theme.input()); g2.fill(box);
-            g2.setColor(invalid ? Theme.pink() : Theme.inputLine());
-            g2.setStroke(new BasicStroke(invalid ? 2.2f : 1.5f)); g2.draw(box);
+            if (focused) {
+                Color glow = invalid
+                        ? new Color(255, 79, 168, 70)
+                        : (Theme.dark ? new Color(102, 232, 255, 65) : new Color(255, 79, 168, 60));
+                g2.setColor(glow);
+                g2.setStroke(new BasicStroke(3.8f));
+                g2.draw(box);
+            }
+            Color strokeColor = invalid
+                    ? Theme.pink()
+                    : (focused ? (Theme.dark ? Theme.cyan() : Theme.pink()) : Theme.inputLine());
+            g2.setColor(strokeColor);
+            g2.setStroke(new BasicStroke(invalid || focused ? 2.1f : 1.5f));
+            g2.draw(box);
             g2.dispose();
             super.paintComponent(g);
         }
@@ -765,22 +828,37 @@ public abstract class FigmaModule extends ModulePanel {
             setFont(Fonts.arcade(8f)); setForeground(Color.WHITE);
             setContentAreaFilled(false); setBorderPainted(false); setFocusPainted(false);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setToolTipText("Run simulation (Ctrl+Enter)");
         }
         @Override public Dimension getPreferredSize() {
             int tw = getFontMetrics(getFont()).stringWidth(getText());
-            return new Dimension(1 + 19 + tw + 13 + ICON + 12 + 1, H + DROP);
+            return new Dimension(1 + 19 + tw + 13 + ICON + 12 + 1, H + DROP + 4);
         }
         @Override public Dimension getMaximumSize() { return getPreferredSize(); }
 
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
             int w = getWidth();
-            if (getModel().isPressed()) g2.translate(0, 2);
-            g2.setColor(RUN_DROP);
-            g2.fill(new RoundRectangle2D.Double(0, DROP, w, H, H, H));
+            boolean hover = getModel().isRollover();
+            boolean pressed = getModel().isPressed();
+            g2.translate(0, 2);
+            if (pressed) g2.translate(0, 2);
+            else if (hover) g2.translate(0, -1);
+
+            if (hover && !pressed) {
+                g2.setColor(new Color(255, 79, 168, 75));
+                g2.setStroke(new BasicStroke(4f));
+                g2.draw(new RoundRectangle2D.Double(1.5, 1.5, w - 3, H - 3, H, H));
+            }
+            if (!pressed) {
+                g2.setColor(RUN_DROP);
+                g2.fill(new RoundRectangle2D.Double(0, DROP, w, H, H, H));
+            }
             RoundRectangle2D pill = new RoundRectangle2D.Double(0.5, 0.5, w - 1, H - 1, H, H);
-            g2.setPaint(new LinearGradientPaint(0, 0, 0, H, new float[]{0f, .5f, 1f},
-                    new Color[]{new Color(0xff9ccf), new Color(0xff4fa8), new Color(0xd82b85)}));
+            Color[] grad = hover && !pressed
+                    ? new Color[]{new Color(0xffb4dc), new Color(0xff63b3), new Color(0xe3348f)}
+                    : new Color[]{new Color(0xff9ccf), new Color(0xff4fa8), new Color(0xd82b85)};
+            g2.setPaint(new LinearGradientPaint(0, 0, 0, H, new float[]{0f, .5f, 1f}, grad));
             g2.fill(pill);
             g2.setColor(RUN_EDGE); g2.setStroke(new BasicStroke(1f)); g2.draw(pill);
 
@@ -802,30 +880,81 @@ public abstract class FigmaModule extends ModulePanel {
         }
     }
 
-    /** Small dashed pill button, e.g. "+ Add job". */
+    /** Semantic pixel-accented pill button, automatically styled for Light and Dark modes. */
     public static class DashedPill extends JButton {
         private static final long serialVersionUID = 1L;
+        private static final int DOT = 5, DOT_GAP = 7;
+
         public DashedPill(String label) {
             super(label);
-            setFont(Fonts.body(13f)); setForeground(Theme.muted());
+            setFont(Fonts.body(13f)); setForeground(Theme.text());
             setContentAreaFilled(false); setBorderPainted(false); setFocusPainted(false);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         }
+        @Override public void setEnabled(boolean b) {
+            super.setEnabled(b);
+            setCursor(Cursor.getPredefinedCursor(b ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+            repaint();
+        }
+        private Color accent() {
+            String t = getText() == null ? "" : getText().toLowerCase();
+            if (t.contains("clear") || t.contains("invalid") || t.contains("deadlock")
+                    || t.contains("out-of-range") || t.contains("page fault") || t.contains("not-exact")
+                    || t.contains("remove") || t.startsWith("−") || t.startsWith("-")) {
+                return Theme.pink();
+            }
+            if (t.contains("sample") || t.contains("large") || t.contains("idle")) {
+                return Theme.green();
+            }
+            if (t.contains("history") || t.contains("undo") || t.contains("replay")
+                    || t.contains("step") || t.contains("show all") || t.contains("copy") || t.contains("paste")) {
+                return Theme.cyan();
+            }
+            return Theme.purple();
+        }
         @Override public Dimension getPreferredSize() {
             FontMetrics fm = getFontMetrics(getFont());
-            return new Dimension(fm.stringWidth(getText()) + 24 + 3, fm.getHeight() + 10 + 3);
+            return new Dimension(fm.stringWidth(getText()) + 24 + DOT + DOT_GAP + 3, fm.getHeight() + 10 + 3);
         }
         @Override public Dimension getMaximumSize() { return getPreferredSize(); }
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = smooth(g);
-            RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, getWidth() - 1.5, getHeight() - 1.5, 28, 28);
-            boolean hover = getModel().isRollover();
-            if (hover) { g2.setColor(Theme.panel2()); g2.fill(box); }
-            g2.setColor(hover ? Theme.pink() : Theme.inputLine());
-            g2.setStroke(new BasicStroke(hover ? 1.8f : 1.5f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND, 10f, new float[]{4f, 3f}, 0f));
+            boolean enabled = isEnabled();
+            if (!enabled) g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.40f));
+            boolean hover = enabled && getModel().isRollover();
+            boolean pressed = enabled && getModel().isPressed();
+            int w = getWidth(), h = getHeight();
+            Color ac = accent();
+
+            if (pressed) g2.translate(0, 1);
+            RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, w - 1.5, h - 1.5, h, h);
+
+            int fillA = hover ? (Theme.dark ? 54 : 46) : (Theme.dark ? 22 : 24);
+            g2.setColor(new Color(ac.getRed(), ac.getGreen(), ac.getBlue(), fillA));
+            g2.fill(box);
+
+            if (hover) {
+                g2.setColor(ac);
+                g2.setStroke(new BasicStroke(1.8f));
+            } else {
+                int borderA = Theme.dark ? 155 : 185;
+                g2.setColor(new Color(ac.getRed(), ac.getGreen(), ac.getBlue(), borderA));
+                g2.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND, 10f, new float[]{4f, 3f}, 0f));
+            }
             g2.draw(box);
-            g2.setFont(getFont()); g2.setColor(hover ? Theme.text() : getForeground());
-            centerText(g2, getText(), getWidth() / 2.0, middle(g2, getHeight() / 2.0));
+
+            g2.setFont(getFont());
+            FontMetrics fm = g2.getFontMetrics();
+            int tw = fm.stringWidth(getText());
+            int totalW = DOT + DOT_GAP + tw;
+            int startX = (w - totalW) / 2;
+
+            // Crisp 5x5 pixel-art status dot
+            g2.setColor(ac);
+            g2.fillRect(startX, (h - DOT) / 2, DOT, DOT);
+
+            g2.setColor(Theme.text());
+            g2.drawString(getText(), startX + DOT + DOT_GAP, (float) middle(g2, h / 2.0));
             g2.dispose();
         }
     }
@@ -835,6 +964,7 @@ public abstract class FigmaModule extends ModulePanel {
         private static final long serialVersionUID = 1L;
         private static final int PX = 2, DROP = 3;
         private final boolean upArrow;
+        private float opacity = 1f;
 
         public PixelButton(String label, boolean upArrow) {
             super(label);
@@ -847,6 +977,15 @@ public abstract class FigmaModule extends ModulePanel {
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         }
 
+        public float getOpacity() { return opacity; }
+        public void setOpacity(float a) {
+            float clamped = Math.max(0f, Math.min(1f, a));
+            if (Math.abs(clamped - opacity) > 0.005f) {
+                opacity = clamped;
+                repaint();
+            }
+        }
+
         @Override public Dimension getPreferredSize() {
             FontMetrics fm = getFontMetrics(getFont());
             int iconW = upArrow ? 14 : 0;
@@ -857,7 +996,9 @@ public abstract class FigmaModule extends ModulePanel {
         @Override public Dimension getMaximumSize() { return getPreferredSize(); }
 
         @Override protected void paintComponent(Graphics g) {
+            if (opacity <= 0.01f) return;
             Graphics2D g2 = (Graphics2D) g.create();
+            if (opacity < 0.99f) g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, opacity));
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             boolean hover = getModel().isRollover();
             boolean pressed = getModel().isPressed();
@@ -987,12 +1128,28 @@ public abstract class FigmaModule extends ModulePanel {
     public static class Card extends Row {
         private static final long serialVersionUID = 1L;
         private boolean dimmed = false;
+        private float pulseAlpha = 0f;
+        private Timer pulseTimer;
         public Card(JComponent content) {
             super(new BorderLayout());
             setBorder(new EmptyBorder(0, 0, 8, 0));     // room for the shadow
             add(content);
         }
         public void setDimmed(boolean d) { this.dimmed = d; repaint(); }
+        public void pulse() {
+            pulseAlpha = 1f;
+            if (pulseTimer != null && pulseTimer.isRunning()) pulseTimer.stop();
+            pulseTimer = new Timer(20, e -> {
+                pulseAlpha -= 0.06f;
+                if (pulseAlpha <= 0f) {
+                    pulseAlpha = 0f;
+                    ((Timer) e.getSource()).stop();
+                }
+                repaint();
+            });
+            pulseTimer.start();
+            repaint();
+        }
         @Override public void paint(Graphics g) {
             if (!dimmed) { super.paint(g); return; }
             Graphics2D g2 = (Graphics2D) g.create();
@@ -1010,6 +1167,15 @@ public abstract class FigmaModule extends ModulePanel {
             RoundRectangle2D box = new RoundRectangle2D.Double(0.75, 0.75, w - 1.5, h - 1.5, 28, 28);
             g2.setColor(Theme.panel2()); g2.fill(box);
             g2.setColor(Theme.inputLine()); g2.setStroke(new BasicStroke(1.5f)); g2.draw(box);
+            if (pulseAlpha > 0.01f) {
+                Color base = Theme.dark ? Theme.cyan() : Theme.pink();
+                g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), Math.round(70 * pulseAlpha)));
+                g2.setStroke(new BasicStroke(5f));
+                g2.draw(new RoundRectangle2D.Double(1.5, 1.5, w - 3, h - 3, 28, 28));
+                g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), Math.round(230 * pulseAlpha)));
+                g2.setStroke(new BasicStroke(2.2f));
+                g2.draw(box);
+            }
             g2.dispose();
         }
     }

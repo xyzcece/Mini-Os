@@ -176,18 +176,6 @@ public class MultiprogrammingModule extends FigmaModule {
             showToast(this, "Cleared · Ctrl+Z to undo");
         });
 
-        tools.add(teacherBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(io80Btn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(largeBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(histBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(undoBtn);
-        tools.add(Box.createHorizontalStrut(8));
-        tools.add(clearBtn);
-        tools.add(Box.createHorizontalStrut(8));
         DashedPill badBtn = new DashedPill("Invalid input test");
         badBtn.addActionListener(e -> {
             pushUndo();
@@ -195,7 +183,20 @@ public class MultiprogrammingModule extends FigmaModule {
             loadPreset(new String[][]{{"7.4", "0.4"}, {"abc", "0.3"}, {"7.6", "-1"}, {"8.0", ""}}, "150", "");
             showToast(this, "Loaded bad input - the result card shows what to fix");
         });
+
+        tools.add(teacherBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(io80Btn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(largeBtn);
+        tools.add(Box.createHorizontalStrut(8));
         tools.add(badBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(histBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(undoBtn);
+        tools.add(Box.createHorizontalStrut(8));
+        tools.add(clearBtn);
         p.add(tools, BorderLayout.SOUTH);
     }
 
@@ -267,8 +268,32 @@ public class MultiprogrammingModule extends FigmaModule {
         JTextField editorField = new JTextField();
         editorField.setFont(Fonts.body(14f));
         editorField.setHorizontalAlignment(SwingConstants.CENTER);
+        editorField.addKeyListener(new KeyAdapter() {
+            @Override public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_DELETE) {
+                    if (jobTable != null && jobTable.getSelectedRowCount() > 1) {
+                        if (jobTable.isEditing()) jobTable.getCellEditor().stopCellEditing();
+                        clearSelectedCells();
+                        e.consume();
+                        return;
+                    }
+                    if (editorField.getSelectionStart() == editorField.getSelectionEnd()
+                            && editorField.getCaretPosition() == editorField.getDocument().getLength()
+                            && editorField.getDocument().getLength() > 0) {
+                        editorField.setText("");
+                        e.consume();
+                    }
+                }
+            }
+        });
         DefaultCellEditor excelEditor = new DefaultCellEditor(editorField) {
             private static final long serialVersionUID = 1L;
+            @Override public boolean isCellEditable(java.util.EventObject anEvent) {
+                if (anEvent instanceof java.awt.event.MouseEvent me && (me.isShiftDown() || me.isControlDown())) {
+                    return false;
+                }
+                return super.isCellEditable(anEvent);
+            }
             @Override public Component getTableCellEditorComponent(JTable tb, Object val, boolean isSel, int r, int c) {
                 JTextField tf = (JTextField) super.getTableCellEditorComponent(tb, val, isSel, r, c);
                 SwingUtilities.invokeLater(tf::selectAll);
@@ -494,16 +519,35 @@ public class MultiprogrammingModule extends FigmaModule {
 
     private void clearSelectedCells() {
         if (jobTable == null) return;
+        if (jobTable.isEditing()) jobTable.getCellEditor().stopCellEditing();
         int[] selRows = jobTable.getSelectedRows();
-        int[] selCols = jobTable.getSelectedColumns();
-        if (selRows.length == 0 || selCols.length == 0) return;
+        if (selRows.length == 0) return;
+
+        boolean wholeRows = selRows.length > 1;
+        int selCol = jobTable.getSelectedColumn();
+        if (!wholeRows && selCol != 1 && selCol != 2) wholeRows = true;
+
+        pushUndo();
+        int cleared = 0;
         for (int r : selRows) {
-            for (int c : selCols) {
-                if (c == 1 || c == 2) {
+            if (r < 0 || r >= jobs.size()) continue;
+            if (wholeRows) {
+                for (int c = 1; c <= 2; c++) {
                     jobTableModel.setValueAt("", r, c);
                     jobs.get(r)[c - 1] = "";
+                    cleared++;
                 }
+            } else {
+                jobTableModel.setValueAt("", r, selCol);
+                jobs.get(r)[selCol - 1] = "";
+                cleared++;
             }
+        }
+        if (cleared > 0) {
+            markInputsDirty();
+            showToast(jobTable, selRows.length > 1
+                    ? "Cleared " + selRows.length + " rows · Ctrl+Z to undo"
+                    : (wholeRows ? "Cleared J" + (selRows[0] + 1) + " · Ctrl+Z to undo" : "Cleared cell"));
         }
     }
 
@@ -677,7 +721,7 @@ public class MultiprogrammingModule extends FigmaModule {
 
     @Override protected void onRunPressed() {
         hasRun = true;
-        rerun();
+        super.onRunPressed();
     }
 
     @Override protected void runSimulation(JPanel r) {

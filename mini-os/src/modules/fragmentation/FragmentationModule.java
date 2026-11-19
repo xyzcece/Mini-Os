@@ -335,7 +335,7 @@ public class FragmentationModule extends FigmaModule {
 
     @Override protected void onRunPressed() {
         hasRun = true;
-        rerun();
+        super.onRunPressed();
     }
 
     @Override protected void runSimulation(JPanel r) {

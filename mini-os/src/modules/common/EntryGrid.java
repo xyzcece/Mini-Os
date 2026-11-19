@@ -247,8 +247,32 @@ public class EntryGrid {
         JTextField editorField = new JTextField();
         editorField.setFont(Fonts.body(14f));
         editorField.setHorizontalAlignment(SwingConstants.CENTER);
+        editorField.addKeyListener(new KeyAdapter() {
+            @Override public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_DELETE) {
+                    if (table != null && table.getSelectedRowCount() > 1) {
+                        if (table.isEditing()) table.getCellEditor().stopCellEditing();
+                        clearSelectedCells();
+                        e.consume();
+                        return;
+                    }
+                    if (editorField.getSelectionStart() == editorField.getSelectionEnd()
+                            && editorField.getCaretPosition() == editorField.getDocument().getLength()
+                            && editorField.getDocument().getLength() > 0) {
+                        editorField.setText("");
+                        e.consume();
+                    }
+                }
+            }
+        });
         DefaultCellEditor excelEditor = new DefaultCellEditor(editorField) {
             private static final long serialVersionUID = 1L;
+            @Override public boolean isCellEditable(java.util.EventObject anEvent) {
+                if (anEvent instanceof java.awt.event.MouseEvent me && (me.isShiftDown() || me.isControlDown())) {
+                    return false;
+                }
+                return super.isCellEditable(anEvent);
+            }
             @Override public Component getTableCellEditorComponent(JTable tb, Object val, boolean isSel, int r, int c) {
                 JTextField tf = (JTextField) super.getTableCellEditorComponent(tb, val, isSel, r, c);
                 SwingUtilities.invokeLater(tf::selectAll);
@@ -469,16 +493,33 @@ public class EntryGrid {
     private void clearSelectedCells() {
         int nc = visibleCount();
         if (table == null) return;
+        if (table.isEditing()) table.getCellEditor().stopCellEditing();
         int[] selRows = table.getSelectedRows();
-        int[] selCols = table.getSelectedColumns();
-        if (selRows.length == 0 || selCols.length == 0) return;
+        if (selRows.length == 0) return;
+
+        boolean wholeRows = selRows.length > 1;
+        int selCol = table.getSelectedColumn();
+        if (!wholeRows && (selCol < 1 || selCol > nc)) wholeRows = true;
+
+        int cleared = 0;
         for (int r : selRows) {
-            for (int c : selCols) {
-                if (c > 0 && c <= nc) {
+            if (r < 0 || r >= rows.size()) continue;
+            if (wholeRows) {
+                for (int c = 1; c <= nc; c++) {
                     model.setValueAt("", r, c);
                     rows.get(r)[c - 1] = "";
+                    cleared++;
                 }
+            } else {
+                model.setValueAt("", r, selCol);
+                rows.get(r)[selCol - 1] = "";
+                cleared++;
             }
+        }
+        if (cleared > 0) {
+            FigmaModule.showToast(table, selRows.length > 1
+                    ? "Cleared " + selRows.length + " rows"
+                    : (wholeRows ? "Cleared row " + idOf.apply(selRows[0]) : "Cleared cell"));
         }
     }
 
