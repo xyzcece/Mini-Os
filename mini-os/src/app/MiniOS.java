@@ -318,13 +318,13 @@ public class MiniOS extends JFrame {
         brand.setBorder(new EmptyBorder(0, 6, 10, 4));
         brand.setAlignmentX(LEFT_ALIGNMENT);
         if (!sidebarCollapsed) {
-            brand.add(new JLabel(icon("heron_bust", 62, 40)));
-            brand.add(Box.createHorizontalStrut(10));
-            brand.add(new ShadowLabel("Hyperpuff", Fonts.pixel(22f), Theme.dark ? new Color(0xd7b4ff) : new Color(0x6a2ca0),
+            brand.add(new JLabel(icon("heron_bust", 52, 34)));
+            brand.add(Box.createHorizontalStrut(8));
+            brand.add(new ShadowLabel("Hyperpuff", Fonts.pixel(18f), Theme.dark ? new Color(0xd7b4ff) : new Color(0x6a2ca0),
                     Theme.dark ? new Color(0, 0, 0, 153) : new Color(255, 255, 255, 230), Theme.dark ? 2 : 1));
             brand.add(Box.createHorizontalGlue());
         }
-        JButton hide = new JButton(icon(Theme.dark ? "button_hide_dark" : "button_hide", 36, 38, sidebarCollapsed));
+        JButton hide = new JButton(icon(Theme.dark ? "button_hide_dark" : "button_hide", 32, 34, sidebarCollapsed));
         hide.setContentAreaFilled(false); hide.setBorderPainted(false); hide.setFocusPainted(false);
         hide.setBorder(new EmptyBorder(0, 0, 0, 0));
         hide.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
