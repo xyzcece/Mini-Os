@@ -36,8 +36,8 @@ Write-Host "Compiling $($files.Count) Java source files (targeting Java 21)..."
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (Test-Path $jarPath) { Remove-Item -Force $jarPath }
-Write-Host "Packaging Hyperpuff.jar..."
-& $jar --create --file $jarPath --main-class app.Main -C $binDir .
+Write-Host "Packaging standalone Hyperpuff.jar (with bundled assets and fonts)..."
+& $jar --create --file $jarPath --main-class app.Main -C $binDir . -C $root assets -C $root fonts
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $sizeKb = [Math]::Round((Get-Item $jarPath).Length / 1KB, 1)

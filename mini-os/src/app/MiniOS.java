@@ -77,7 +77,8 @@ public class MiniOS extends JFrame {
             desktop.revalidate();
             desktop.repaint();
         }));
-        try { setIconImage(ImageIO.read(Fonts.file("assets/images/app_icon.png"))); } catch (Exception ignored) {}
+        java.awt.image.BufferedImage appIcon = Fonts.image("assets/images/app_icon.png");
+        if (appIcon != null) setIconImage(appIcon);
 
         setContentPane(desktop);
         desktop.setLayout(new BorderLayout());
@@ -317,13 +318,13 @@ public class MiniOS extends JFrame {
         brand.setBorder(new EmptyBorder(0, 6, 10, 4));
         brand.setAlignmentX(LEFT_ALIGNMENT);
         if (!sidebarCollapsed) {
-            brand.add(new JLabel(icon("heron_bust", 62, 40)));
-            brand.add(Box.createHorizontalStrut(10));
-            brand.add(new ShadowLabel("Hyperpuff", Fonts.pixel(22f), Theme.dark ? new Color(0xd7b4ff) : new Color(0x6a2ca0),
+            brand.add(new JLabel(icon("heron_bust", 52, 34)));
+            brand.add(Box.createHorizontalStrut(8));
+            brand.add(new ShadowLabel("Hyperpuff", Fonts.pixel(18f), Theme.dark ? new Color(0xd7b4ff) : new Color(0x6a2ca0),
                     Theme.dark ? new Color(0, 0, 0, 153) : new Color(255, 255, 255, 230), Theme.dark ? 2 : 1));
             brand.add(Box.createHorizontalGlue());
         }
-        JButton hide = new JButton(icon(Theme.dark ? "button_hide_dark" : "button_hide", 36, 38, sidebarCollapsed));
+        JButton hide = new JButton(icon(Theme.dark ? "button_hide_dark" : "button_hide", 32, 34, sidebarCollapsed));
         hide.setContentAreaFilled(false); hide.setBorderPainted(false); hide.setFocusPainted(false);
         hide.setBorder(new EmptyBorder(0, 0, 0, 0));
         hide.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -491,58 +492,171 @@ public class MiniOS extends JFrame {
         }
     }
 
+    /** Builds an on-theme rounded Hyperpuff OS window frame with a glossy pink title bar and close button. */
+    private JPanel buildOsDialogFrame(JDialog dlg, String barTitle, JComponent body, JComponent footer) {
+        dlg.setUndecorated(true);
+
+        final int arc = 18, barH = 38;
+        JPanel outer = new JPanel(new BorderLayout()) {
+            @Override protected void paintComponent(Graphics g0) {
+                Graphics2D g = (Graphics2D) g0.create();
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                int w = getWidth(), h = getHeight();
+                g.setPaint(new GradientPaint(0, 0, Theme.bg(), 0, h, Theme.panel2()));
+                g.fillRect(0, 0, w, h);
+                // Glossy pink OS title bar
+                g.setPaint(new GradientPaint(0, 0, Theme.barTop(), 0, barH, Theme.barBottom()));
+                g.fillRect(0, 0, w, barH);
+                g.setColor(new Color(255, 255, 255, 75));
+                g.fillRect(0, 0, w, barH / 3);
+                g.setColor(Theme.pink());
+                g.setStroke(new BasicStroke(2f));
+                g.draw(new java.awt.geom.RoundRectangle2D.Double(1, 1, w - 2, h - 2, arc, arc));
+                g.dispose();
+            }
+        };
+        outer.setOpaque(true);
+
+        // Draggable title bar
+        JPanel bar = new JPanel(new BorderLayout(8, 0));
+        bar.setOpaque(false);
+        bar.setPreferredSize(new Dimension(0, barH));
+        bar.setBorder(new EmptyBorder(0, 12, 0, 10));
+
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 9));
+        left.setOpaque(false);
+        Icon miniIcon = icon("app_icon", 18, 18);
+        if (miniIcon != null) left.add(new JLabel(miniIcon));
+        JLabel titleLbl = new JLabel(barTitle);
+        titleLbl.setFont(Fonts.uiBold(13f));
+        titleLbl.setForeground(Color.WHITE);
+        left.add(titleLbl);
+        bar.add(left, BorderLayout.WEST);
+
+        JButton closeX = new JButton("×") {
+            @Override protected void paintComponent(Graphics g0) {
+                Graphics2D g = (Graphics2D) g0.create();
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                boolean hov = getModel().isRollover();
+                g.setColor(hov ? new Color(0xff2e63) : new Color(0xe03a68));
+                g.fillRoundRect(1, 1, getWidth() - 2, getHeight() - 2, 8, 8);
+                g.setColor(new Color(255, 255, 255, 160));
+                g.drawRoundRect(1, 1, getWidth() - 3, getHeight() - 3, 8, 8);
+                g.setFont(getFont());
+                g.setColor(Color.WHITE);
+                FontMetrics fm = g.getFontMetrics();
+                g.drawString("×", (getWidth() - fm.stringWidth("×")) / 2, (getHeight() - fm.getHeight()) / 2 + fm.getAscent() - 1);
+                g.dispose();
+            }
+        };
+        closeX.setFont(Fonts.uiBold(14f));
+        closeX.setPreferredSize(new Dimension(24, 22));
+        closeX.setContentAreaFilled(false); closeX.setBorderPainted(false); closeX.setFocusPainted(false);
+        closeX.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        closeX.addActionListener(e -> dlg.dispose());
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 8));
+        right.setOpaque(false);
+        right.add(closeX);
+        bar.add(right, BorderLayout.EAST);
+
+        final Point[] dragOff = { null };
+        bar.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mousePressed(java.awt.event.MouseEvent e) { dragOff[0] = e.getPoint(); }
+        });
+        bar.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+            @Override public void mouseDragged(java.awt.event.MouseEvent e) {
+                if (dragOff[0] != null) {
+                    Point loc = dlg.getLocation();
+                    dlg.setLocation(loc.x + e.getX() - dragOff[0].x, loc.y + e.getY() - dragOff[0].y);
+                }
+            }
+        });
+        outer.add(bar, BorderLayout.NORTH);
+
+        JPanel inner = new JPanel(new BorderLayout(0, 14));
+        inner.setOpaque(false);
+        inner.setBorder(new EmptyBorder(16, 18, 16, 18));
+        inner.add(body, BorderLayout.CENTER);
+        if (footer != null) inner.add(footer, BorderLayout.SOUTH);
+        outer.add(inner, BorderLayout.CENTER);
+        return outer;
+    }
+
+    /** Glossy pink pill CTA button matching RUN SIMULATION for primary dialog actions. */
+    private static JButton pinkPillButton(String label) {
+        JButton b = new JButton(label) {
+            @Override public Dimension getPreferredSize() {
+                FontMetrics fm = getFontMetrics(getFont());
+                return new Dimension(fm.stringWidth(getText()) + 34, 34);
+            }
+            @Override protected void paintComponent(Graphics g0) {
+                Graphics2D g = (Graphics2D) g0.create();
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                int w = getWidth(), h = getHeight() - 3;
+                boolean hover = getModel().isRollover(), pressed = getModel().isPressed();
+                if (pressed) g.translate(0, 2);
+                else if (hover) g.translate(0, -1);
+                if (!pressed) {
+                    g.setColor(modules.common.FigmaModule.RUN_DROP);
+                    g.fillRoundRect(0, 3, w, h, h, h);
+                }
+                Color[] grad = hover && !pressed
+                        ? new Color[]{new Color(0xffb4dc), new Color(0xff63b3), new Color(0xe3348f)}
+                        : new Color[]{new Color(0xff9ccf), new Color(0xff4fa8), new Color(0xd82b85)};
+                g.setPaint(new LinearGradientPaint(0, 0, 0, h, new float[]{0f, 0.5f, 1f}, grad));
+                g.fillRoundRect(0, 0, w - 1, h - 1, h, h);
+                g.setColor(modules.common.FigmaModule.RUN_EDGE);
+                g.drawRoundRect(0, 0, w - 1, h - 1, h, h);
+                g.setFont(getFont());
+                g.setColor(Color.WHITE);
+                FontMetrics fm = g.getFontMetrics();
+                g.drawString(getText(), (w - fm.stringWidth(getText())) / 2, (h - fm.getHeight()) / 2 + fm.getAscent());
+                g.dispose();
+            }
+        };
+        b.setFont(Fonts.arcade(7.5f));
+        b.setContentAreaFilled(false); b.setBorderPainted(false); b.setFocusPainted(false);
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return b;
+    }
+
     private boolean confirmExitDialog() {
         final boolean[] confirmed = { false };
         JDialog dlg = new JDialog(this, "Confirm Exit", true);
-        dlg.setUndecorated(true);
 
-        JPanel root = new JPanel(new BorderLayout(0, 14)) {
-            @Override protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setPaint(new GradientPaint(0, 0, Theme.bg(), 0, getHeight(), Theme.panel2()));
-                g2.fillRect(0, 0, getWidth(), getHeight());
-                g2.dispose();
-            }
-        };
-        root.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.pink(), 2),
-                new EmptyBorder(16, 20, 16, 20)));
+        JPanel body = new JPanel(new BorderLayout(14, 0));
+        body.setOpaque(false);
 
-        JPanel hdr = new JPanel(new BorderLayout(10, 0));
-        hdr.setOpaque(false);
-        JLabel title = new JLabel("CONFIRM EXIT — HYPERPUFF");
-        title.setFont(Fonts.arcade(9f));
-        title.setForeground(Theme.pink());
-        hdr.add(title, BorderLayout.WEST);
-        root.add(hdr, BorderLayout.NORTH);
+        Icon mascotIcon = icon("heron_full", 64, 68);
+        if (mascotIcon != null) {
+            JLabel mascotLbl = new JLabel(mascotIcon);
+            mascotLbl.setVerticalAlignment(SwingConstants.CENTER);
+            body.add(mascotLbl, BorderLayout.WEST);
+        }
 
-        JPanel msgBox = new JPanel(new BorderLayout());
-        msgBox.setBackground(Theme.panel());
-        msgBox.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.inputLine(), 1),
-                new EmptyBorder(14, 16, 14, 16)));
-        JLabel msg = new JLabel("<html><div style='width:320px;line-height:1.45;'>"
+        modules.common.FigmaModule.Box12 msgCard = new modules.common.FigmaModule.Box12(new BorderLayout());
+        msgCard.setBorder(new EmptyBorder(12, 16, 12, 16));
+        JLabel msg = new JLabel("<html><div style='width:290px;line-height:1.45;'>"
                 + "You have entered inputs in one or more modules.<br>"
                 + "Are you sure you want to exit <b>Hyperpuff</b>?"
                 + "</div></html>");
         msg.setFont(Fonts.body(14f));
         msg.setForeground(Theme.text());
-        msgBox.add(msg, BorderLayout.CENTER);
-        root.add(msgBox, BorderLayout.CENTER);
+        msgCard.add(msg, BorderLayout.CENTER);
+        body.add(msgCard, BorderLayout.CENTER);
 
         JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         footer.setOpaque(false);
-        modules.common.FigmaModule.PixelButton cancelBtn = new modules.common.FigmaModule.PixelButton("STAY", false);
-        cancelBtn.addActionListener(e -> dlg.dispose());
-        modules.common.FigmaModule.PixelButton exitBtn = new modules.common.FigmaModule.PixelButton("EXIT", false);
-        exitBtn.setForeground(Theme.pink());
+        modules.common.FigmaModule.PixelButton stayBtn = new modules.common.FigmaModule.PixelButton("STAY", false);
+        stayBtn.addActionListener(e -> dlg.dispose());
+        JButton exitBtn = pinkPillButton("EXIT");
         exitBtn.addActionListener(e -> {
             confirmed[0] = true;
             dlg.dispose();
         });
-        footer.add(cancelBtn);
+        footer.add(stayBtn);
         footer.add(exitBtn);
-        root.add(footer, BorderLayout.SOUTH);
 
         dlg.getRootPane().registerKeyboardAction(e -> dlg.dispose(),
                 KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0),
@@ -554,8 +668,9 @@ public class MiniOS extends JFrame {
                 KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER, 0),
                 JComponent.WHEN_IN_FOCUSED_WINDOW);
 
-        dlg.setContentPane(root);
+        dlg.setContentPane(buildOsDialogFrame(dlg, "Confirm Exit — Hyperpuff", body, footer));
         dlg.pack();
+        try { dlg.setShape(new java.awt.geom.RoundRectangle2D.Double(0, 0, dlg.getWidth(), dlg.getHeight(), 18, 18)); } catch (Exception ignored) {}
         dlg.setLocationRelativeTo(this);
         dlg.setVisible(true);
         return confirmed[0];
@@ -592,7 +707,7 @@ public class MiniOS extends JFrame {
                     • If all processes finish → SAFE (Safe Sequence shown). Otherwise → NOT SAFE (deadlock risk).
 
                 ══════════════════════════════════════════════════════════════════════
-                  3. PAGING LAB (Memory Address Translation)
+                  3. PAGING (Memory Address Translation)
                 ══════════════════════════════════════════════════════════════════════
                   Purpose : Maps fixed-size logical pages to physical memory frames.
                   Key Formulas:
@@ -675,30 +790,6 @@ public class MiniOS extends JFrame {
                   • COPY OUTPUT    : Copy a formatted text summary to clipboard
                 """;
         JDialog dlg = new JDialog(this, "Hyperpuff — Quick Help", true);
-        dlg.setUndecorated(true);
-        JPanel root = new JPanel(new BorderLayout(0, 12)) {
-            @Override protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setPaint(new GradientPaint(0, 0, Theme.bg(), 0, getHeight(), Theme.panel2()));
-                g2.fillRect(0, 0, getWidth(), getHeight());
-                g2.dispose();
-            }
-        };
-        root.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Theme.pink(), 2),
-                new EmptyBorder(16, 18, 16, 18)));
-
-        JPanel hdr = new JPanel(new BorderLayout());
-        hdr.setOpaque(false);
-        JLabel title = new JLabel("HYPERPUFF — QUICK HELP & FORMULAS");
-        title.setFont(Fonts.arcade(9f));
-        title.setForeground(Theme.pink());
-        hdr.add(title, BorderLayout.WEST);
-        JLabel hint = new JLabel("Press ESC or click CLOSE");
-        hint.setFont(Fonts.body(12f));
-        hint.setForeground(Theme.muted());
-        hdr.add(hint, BorderLayout.EAST);
-        root.add(hdr, BorderLayout.NORTH);
 
         JTextArea area = new JTextArea(helpText);
         area.setEditable(false);
@@ -708,24 +799,27 @@ public class MiniOS extends JFrame {
         area.setForeground(Theme.text());
         area.setBorder(new EmptyBorder(14, 16, 14, 16));
         JScrollPane sp = new JScrollPane(area);
-        sp.setPreferredSize(new Dimension(740, 480));
+        sp.setPreferredSize(new Dimension(740, 460));
         sp.getVerticalScrollBar().setUnitIncrement(22);
         sp.setBorder(BorderFactory.createLineBorder(Theme.inputLine(), 1));
         modules.common.FigmaModule.styleScrollPane(sp);
-        root.add(sp, BorderLayout.CENTER);
 
-        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        JPanel footer = new JPanel(new BorderLayout());
         footer.setOpaque(false);
-        modules.common.FigmaModule.PixelButton closeBtn = new modules.common.FigmaModule.PixelButton("CLOSE", false);
+        JLabel hint = new JLabel("Press ESC or click CLOSE");
+        hint.setFont(Fonts.body(12f));
+        hint.setForeground(Theme.muted());
+        footer.add(hint, BorderLayout.WEST);
+        JButton closeBtn = pinkPillButton("CLOSE");
         closeBtn.addActionListener(e -> dlg.dispose());
-        footer.add(closeBtn);
-        root.add(footer, BorderLayout.SOUTH);
+        footer.add(closeBtn, BorderLayout.EAST);
 
         dlg.getRootPane().registerKeyboardAction(e -> dlg.dispose(),
                 KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0),
                 JComponent.WHEN_IN_FOCUSED_WINDOW);
-        dlg.setContentPane(root);
+        dlg.setContentPane(buildOsDialogFrame(dlg, "Hyperpuff — Quick Help & Formulas", sp, footer));
         dlg.pack();
+        try { dlg.setShape(new java.awt.geom.RoundRectangle2D.Double(0, 0, dlg.getWidth(), dlg.getHeight(), 18, 18)); } catch (Exception ignored) {}
         dlg.setLocationRelativeTo(this);
         dlg.setVisible(true);
     }
@@ -1214,9 +1308,8 @@ public class MiniOS extends JFrame {
             this.art = CACHE.computeIfAbsent(key, k -> {
                 java.awt.image.BufferedImage src = null;
                 for (String suffix : new String[]{"@8x", "@4x", "@3x", "@2x", "@1x", ""}) {
-                    File f = Fonts.file("assets/images/" + name + suffix + ".png");
-                    if (!f.exists()) continue;
-                    try { src = ImageIO.read(f); break; } catch (Exception ignored) { }
+                    src = Fonts.image("assets/images/" + name + suffix + ".png");
+                    if (src != null) break;
                 }
                 return src == null ? null : fit(src, box * 2);
             });
@@ -1301,9 +1394,8 @@ public class MiniOS extends JFrame {
     private static Icon icon(String name, int w, int h, boolean flip) {
         java.awt.image.BufferedImage img = null;
         for (String suffix : new String[]{"@8x", "@4x", "@3x", "@2x", "@1x", ""}) {
-            File f = Fonts.file("assets/images/" + name + suffix + ".png");
-            if (!f.exists()) continue;
-            try { img = ImageIO.read(f); break; } catch (Exception ignored) { }
+            img = Fonts.image("assets/images/" + name + suffix + ".png");
+            if (img != null) break;
         }
         if (img == null) return null;
         final java.awt.image.BufferedImage art = img;

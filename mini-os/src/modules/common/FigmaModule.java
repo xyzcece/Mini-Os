@@ -697,8 +697,7 @@ public abstract class FigmaModule extends ModulePanel {
         private static final long serialVersionUID = 1L;
         private static BufferedImage art;
         static {
-            try { art = ImageIO.read(Fonts.file("assets/images/heron_sticker_simulating@3x.png")); }
-            catch (Exception e) { art = null; }
+            art = Fonts.image("assets/images/heron_sticker_simulating@3x.png");
         }
         static final int ART_W = 96;
         static final double TILT = Math.toRadians(8);
