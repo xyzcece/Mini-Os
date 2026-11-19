@@ -7,7 +7,7 @@
 ## Team Members
 | Role | Member Name | Assigned Modules |
 |---|---|---|
-| Member 1 | **Chloe Bautista** | CPU Scheduling, Paging Lab, Segmentation |
+| Member 1 | **Chloe Bautista** | CPU Scheduling, Paging, Segmentation |
 | Member 2 | **Ysamarie Siblero** | Page Replacement, Disk Scheduling, Multiprogramming |
 | Member 3 | **Charmee Cantones** | Banker's Algorithm, Fragmentation, Desktop Shell & Theme |
 
@@ -71,7 +71,7 @@ java -jar Hyperpuff.jar
 * **Outputs**: `Need` matrix, step-by-step `AVAILABLE` ladder, `SAFE` / `NOT SAFE` verdict, and Safe Sequence.
 * **Sample Verification**: 5 processes × 4 resources (`Available: 3 2 2 1`) → `SAFE`, Safe Sequence: `P3, P4, P5, P1, P2`.
 
-### 3. Paging Lab (`src/modules/paging/PagingModule.java`)
+### 3. Paging (`src/modules/paging/PagingModule.java`)
 * **Part 1 (Page Table Size)**: `Page Table Entries = Address Space ÷ Page Size` (e.g. `1 GB ÷ 4 KB = 262,144 entries`).
 * **Part 2 (Address Translation)**: Dynamic page-to-frame table (`-` = not in memory), `page # = logical ÷ page size`, `offset = logical mod page size`, `physical = frame × page size + offset`, with page-fault and out-of-range detection.
 * **Sample Verification**: `page size = 4`, frames `5 6 1 2`, `logical = 13` → `page 3, offset 1 → frame 2 → physical 9`.

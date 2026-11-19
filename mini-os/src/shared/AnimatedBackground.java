@@ -37,27 +37,21 @@ public class AnimatedBackground extends JPanel {
 
     public AnimatedBackground() {
         setLayout(null);
-        try {
-            dayBg = ImageIO.read(Fonts.file("assets/images/wallpaper_umak_morning.png"));
-            nightBg = ImageIO.read(Fonts.file("assets/images/wallpaper_umak_night.png"));
-        } catch (IOException e) {
-            throw new RuntimeException("Run the app from the project root so /assets can be found", e);
+        dayBg = Fonts.image("assets/images/wallpaper_umak_morning.png");
+        nightBg = Fonts.image("assets/images/wallpaper_umak_night.png");
+        BufferedImage baseNight = Fonts.image("assets/images/jeep_night.png");
+        if (baseNight != null) {
+            nightJeeps = new BufferedImage[]{
+                    baseNight,
+                    recolorJeep(baseNight, false, 1),
+                    recolorJeep(baseNight, false, 2)
+            };
+            dayJeeps = new BufferedImage[]{
+                    recolorJeep(baseNight, true, 0),
+                    recolorJeep(baseNight, true, 1),
+                    recolorJeep(baseNight, true, 2)
+            };
         }
-        try {
-            BufferedImage baseNight = ImageIO.read(Fonts.file("assets/images/jeep_night.png"));
-            if (baseNight != null) {
-                nightJeeps = new BufferedImage[]{
-                        baseNight,
-                        recolorJeep(baseNight, false, 1),
-                        recolorJeep(baseNight, false, 2)
-                };
-                dayJeeps = new BufferedImage[]{
-                        recolorJeep(baseNight, true, 0),
-                        recolorJeep(baseNight, true, 1),
-                        recolorJeep(baseNight, true, 2)
-                };
-            }
-        } catch (IOException ignored) {}
 
         new Timer(45, e -> {
             tick += 0.08;

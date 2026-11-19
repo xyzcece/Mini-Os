@@ -77,7 +77,8 @@ public class MiniOS extends JFrame {
             desktop.revalidate();
             desktop.repaint();
         }));
-        try { setIconImage(ImageIO.read(Fonts.file("assets/images/app_icon.png"))); } catch (Exception ignored) {}
+        java.awt.image.BufferedImage appIcon = Fonts.image("assets/images/app_icon.png");
+        if (appIcon != null) setIconImage(appIcon);
 
         setContentPane(desktop);
         desktop.setLayout(new BorderLayout());
@@ -592,7 +593,7 @@ public class MiniOS extends JFrame {
                     • If all processes finish → SAFE (Safe Sequence shown). Otherwise → NOT SAFE (deadlock risk).
 
                 ══════════════════════════════════════════════════════════════════════
-                  3. PAGING LAB (Memory Address Translation)
+                  3. PAGING (Memory Address Translation)
                 ══════════════════════════════════════════════════════════════════════
                   Purpose : Maps fixed-size logical pages to physical memory frames.
                   Key Formulas:
@@ -1214,9 +1215,8 @@ public class MiniOS extends JFrame {
             this.art = CACHE.computeIfAbsent(key, k -> {
                 java.awt.image.BufferedImage src = null;
                 for (String suffix : new String[]{"@8x", "@4x", "@3x", "@2x", "@1x", ""}) {
-                    File f = Fonts.file("assets/images/" + name + suffix + ".png");
-                    if (!f.exists()) continue;
-                    try { src = ImageIO.read(f); break; } catch (Exception ignored) { }
+                    src = Fonts.image("assets/images/" + name + suffix + ".png");
+                    if (src != null) break;
                 }
                 return src == null ? null : fit(src, box * 2);
             });
@@ -1301,9 +1301,8 @@ public class MiniOS extends JFrame {
     private static Icon icon(String name, int w, int h, boolean flip) {
         java.awt.image.BufferedImage img = null;
         for (String suffix : new String[]{"@8x", "@4x", "@3x", "@2x", "@1x", ""}) {
-            File f = Fonts.file("assets/images/" + name + suffix + ".png");
-            if (!f.exists()) continue;
-            try { img = ImageIO.read(f); break; } catch (Exception ignored) { }
+            img = Fonts.image("assets/images/" + name + suffix + ".png");
+            if (img != null) break;
         }
         if (img == null) return null;
         final java.awt.image.BufferedImage art = img;

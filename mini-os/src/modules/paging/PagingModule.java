@@ -59,7 +59,7 @@ public class PagingModule extends FigmaModule {
     private final transient InputHistory<State> history = new InputHistory<>();
     private static final String[] UNITS = {"KB", "MB", "GB"};
 
-    @Override public String title()    { return "Paging Lab"; }
+    @Override public String title()    { return "Paging"; }
     @Override public String subtitle() { return "Page table size, page-to-frame mapping, and logical-to-physical address translation."; }
     @Override protected void onUndoPressed() { history.undo(this, snapshot(), this::restore); }
     @Override protected void onRedoPressed() { history.redo(this, snapshot(), this::restore); }

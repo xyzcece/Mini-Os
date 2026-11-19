@@ -2,14 +2,16 @@ package shared;
 
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
+import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
+import javax.imageio.ImageIO;
 
 /**
- * Loads the 6 Mini OS fonts from the /fonts folder (bundled, so it looks the
- * same on every laptop).
- * OWNER: Member 3.
+ * Loads bundled fonts and image resources from the JAR classpath or local folders.
  */
 public final class Fonts {
     private Fonts() {
@@ -19,22 +21,58 @@ public final class Fonts {
     /** Global UI font scale for projector zoom (0.85 to 1.35). */
     public static float scale = 1.0f;
 
-    /**
-     * Resolves a project file whether the working directory is the repo root or
-     * mini-os/.
-     */
+    /** Resolves a local file from the working directory, mini-os/, or alongside the JAR. */
     public static File file(String path) {
         File f = new File(path);
         if (f.exists())
             return f;
         File nested = new File("mini-os/" + path);
-        return nested.exists() ? nested : f;
+        if (nested.exists())
+            return nested;
+        try {
+            File loc = new File(Fonts.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            File base = loc.isFile() ? loc.getParentFile() : loc;
+            if (base != null) {
+                File sibling = new File(base, path);
+                if (sibling.exists())
+                    return sibling;
+            }
+        } catch (Exception ignored) {
+        }
+        return f;
+    }
+
+    /** Opens a resource stream from inside the JAR first, then falls back to the filesystem. */
+    public static InputStream stream(String path) {
+        String normalized = path.startsWith("/") ? path.substring(1) : path;
+        InputStream in = Fonts.class.getResourceAsStream("/" + normalized);
+        if (in != null)
+            return in;
+        File f = file(normalized);
+        if (f.exists()) {
+            try {
+                return new FileInputStream(f);
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    /** Loads a BufferedImage from the JAR classpath or filesystem, or null if not found. */
+    public static BufferedImage image(String path) {
+        try (InputStream in = stream(path)) {
+            return in == null ? null : ImageIO.read(in);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static Font load(String file) {
         return cache.computeIfAbsent(file, f -> {
-            try {
-                Font font = Font.createFont(Font.TRUETYPE_FONT, file("fonts/" + f));
+            try (InputStream in = stream("fonts/" + f)) {
+                if (in == null)
+                    throw new java.io.FileNotFoundException(f);
+                Font font = Font.createFont(Font.TRUETYPE_FONT, in);
                 GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(font);
                 return font;
             } catch (Exception e) {

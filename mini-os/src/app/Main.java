@@ -21,9 +21,7 @@ public class Main {
         JWindow splash = new JWindow();
         splash.setBackground(new Color(0, 0, 0, 0));
 
-        BufferedImage heron = null;
-        try { heron = ImageIO.read(Fonts.file("assets/images/heron_full@3x.png")); } catch (Exception ignored) {}
-        final BufferedImage mascot = heron;
+        final BufferedImage mascot = Fonts.image("assets/images/heron_full@3x.png");
 
         final double[] progress = {0.0};
         JPanel card = new JPanel() {
