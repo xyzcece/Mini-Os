@@ -57,16 +57,24 @@ public class AnimatedBackground extends JPanel {
             tick += 0.08;
             double jeepSpeed = jeepBoostTicks > 0 ? 5.6 : 2.8;
             if (jeepBoostTicks > 0) jeepBoostTicks--;
-            jeepX -= jeepSpeed;
-            if (jeepX < -240) {
-                jeepX = BASE_W + 140;
-                jeepVar = (jeepVar + 1) % 3;
-            }
             double trikeSpeed = trikeBoostTicks > 0 ? 4.4 : 2.0;
             if (trikeBoostTicks > 0) trikeBoostTicks--;
+
+            // Keep a safe following distance so the jeepney and tricycle never overlap in the same lane
+            if (jeepX > trikeX && jeepX - trikeX < 195 && jeepSpeed > trikeSpeed) {
+                jeepSpeed = trikeSpeed;
+            } else if (trikeX > jeepX && trikeX - jeepX < 295 && trikeSpeed > jeepSpeed) {
+                trikeSpeed = jeepSpeed;
+            }
+
+            jeepX -= jeepSpeed;
+            if (jeepX < -240) {
+                jeepX = Math.max(BASE_W + 140, trikeX + 260);
+                jeepVar = (jeepVar + 1) % 3;
+            }
             trikeX -= trikeSpeed;
             if (trikeX < -180) {
-                trikeX = BASE_W + 260;
+                trikeX = Math.max(BASE_W + 260, jeepX + 340);
             }
             if (jeepBubbleTicks > 0) jeepBubbleTicks--;
             if (trikeBubbleTicks > 0) trikeBubbleTicks--;
@@ -88,7 +96,7 @@ public class AnimatedBackground extends JPanel {
         }
         Rectangle tHit = new Rectangle(trikeBounds.x - 10, trikeBounds.y - 10, trikeBounds.width + 20, trikeBounds.height + 20);
         if (trikeBounds.width > 0 && tHit.contains(p)) {
-            String[] msgs = {"Kring kring!", "Sakay na!", "Tsuper!"};
+            String[] msgs = {"Kring kring!", "Sakay na!", "Tabi lang po!"};
             trikeBubbleText = msgs[bubbleCycle++ % msgs.length];
             trikeBoostTicks = 35;
             trikeBubbleTicks = 50;
