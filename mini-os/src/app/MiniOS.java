@@ -683,7 +683,7 @@ public class MiniOS extends JFrame {
                 ══════════════════════════════════════════════════════════════════════
                   Purpose : Decides which ready process runs on the CPU and in what order.
                   Algorithms:
-                    • FIFO / FCFS — Runs jobs strictly in Arrival Time (AT) order.
+                    • FIFO — Runs jobs strictly in Arrival Time (AT) order.
                     • SJF (Non-Preemptive) — Picks the ready job with the shortest Burst/Run Time (RT).
                     • SRT (Preemptive SJF) — Always switches to the ready job with the least remaining time.
                     • Priority (Non-Preemptive / Preemptive) — Lower priority number = higher priority (1 is highest).
@@ -757,7 +757,7 @@ public class MiniOS extends JFrame {
                 ══════════════════════════════════════════════════════════════════════
                   Purpose : Orders pending disk track requests to minimize disk arm seek time.
                   Algorithms:
-                    • FCFS — Services tracks in arrival order.
+                    • FIFO — Services tracks in arrival order.
                     • SSTF — Always moves to the closest pending track (Shortest Seek Time First).
                     • SCAN / LOOK — Sweeps in one direction then reverses (SCAN hits disk end; LOOK stops at last request).
                     • C-SCAN / C-LOOK — Sweeps one direction only, then jumps back to the start.
@@ -767,11 +767,13 @@ public class MiniOS extends JFrame {
                 ══════════════════════════════════════════════════════════════════════
                   8. MULTIPROGRAMMING (CPU Utilization Model)
                 ══════════════════════════════════════════════════════════════════════
-                  Purpose : Simulates multiple jobs sharing CPU time while waiting on I/O.
-                  Key Formulas (p = I/O Wait fraction, NJ = active jobs in memory, ET = interval duration):
-                    • CPU Utilization = 1 − p^NJ
-                    • %CPU per Job    = (1 − p^NJ) ÷ NJ
-                    • Work Done (HW/J)= ET × (%CPU/J)
+                  Purpose : Simulates multiple jobs sharing CPU time across arrive/terminate events.
+                  Events  : a/s = arrive and started   |   t = terminate (Time = ET + prev time)
+                  Key Formulas (NJ = active jobs in memory, p = I/O Wait fraction):
+                    • %CPU/NJ   = 1 ÷ NJ  (at 0% I/O wait)   |   (1 − p^NJ) ÷ NJ  (with I/O wait)
+                    • ET        = present time − prev time
+                    • HW/job    = ET × (%CPU/NJ)
+                    • Time Left = prev Time Left − HW/job  (terminates when Time Left reaches 0)
 
                 ══════════════════════════════════════════════════════════════════════
                   KEYBOARD SHORTCUTS & TIPS
